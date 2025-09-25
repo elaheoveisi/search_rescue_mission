@@ -1,3 +1,4 @@
+# world.py
 import random
 from pyglet import shapes
 from config import (
@@ -50,7 +51,7 @@ def _comps(wset):
 
 # -------- wall generation --------
 def generate_walls(difficulty: str):
-
+    """Generates wall layout and returns two sets: (all_walls, orange_walls)."""
     cfg = DIFFICULTIES[difficulty]
     rng = random.Random(cfg.get("seed", None))
 
@@ -86,7 +87,7 @@ def generate_walls(difficulty: str):
         dx, dy = rng.choice(dirs)
         length = rng.randint(int(min_len), int(max_len))
 
-        prop = []      
+        prop = []
         x, y = sx, sy
         ok = True
         for _ in range(length):              #ensures only valid, non-overlapping wall segments
@@ -129,7 +130,17 @@ def generate_walls(difficulty: str):
                 if not add: break
                 walls.update(add); reserved |= _buf(add); comp.update(add)
 
-    return walls
+    # 4) Determine which wall components are orange
+    wall_comps = _comps(walls)
+    orange_walls = set()
+    if wall_comps:
+        k = int(len(wall_comps) * float(WALL_ORANGE_PCT))
+        if k > 0:
+            for comp in rng.sample(wall_comps, k):
+                orange_walls.update(comp)
+    orange_walls -= _border_cells()
+
+    return walls, orange_walls
 
 # -------- victim placement --------
 def place_victims(distmap, start, all_passable=None):  #distmap: how far every cell is from start
@@ -149,16 +160,16 @@ def place_victims(distmap, start, all_passable=None):  #distmap: how far every c
 
     # ---------------- REDS ----------------
     dists = {p: distmap.get(p, 0) for p in pool}
-    scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])  
+    scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])
     q_idx = int(len(scored_linear) * float(RED_FAR_QUANTILE))
-    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0  #cutoff distance 
+    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0  #cutoff distance
     far = [p for (p, d) in scored_linear if d >= cutoff]
     if len(far) < max(NUM_RED, 8):
         far += [p for p, _ in reversed(scored_linear) if p not in far]
 
     passable = set(all_passable) if all_passable is not None else set(p for p, _ in scored_linear)
-    dirs4 = ((1,0),(-1,0),(0,1),(0,-1))
-    def degree(p): 
+    dirs4 = ((1,0),(-1,0),(0,1),(-1,0))
+    def degree(p):
         x,y=p; return sum(((x+dx,y+dy) in passable) for dx,dy in dirs4)
     def is_corridor(p):
         x,y=p; neigh=[(x+dx,y+dy) for dx,dy in dirs4 if (x+dx,y+dy) in passable]
@@ -254,18 +265,10 @@ def place_victims(distmap, start, all_passable=None):  #distmap: how far every c
     return victims
 
 # -------- drawing --------
-def draw_world(play_batch, walls, victims):
-    comps = _comps(walls)
-    orange = set()
-    if comps:
-        k = int(len(comps) * float(WALL_ORANGE_PCT))
-        if k > 0:
-            for i in random.sample(range(len(comps)), k):
-                orange.update(comps[i])
-    orange -= _border_cells()
-
+def draw_world(play_batch, walls, orange_walls, victims):
+    """Draws walls (coloring orange ones differently) and victims."""
     wall_shapes = [shapes.Rectangle(x*CELL_SIZE, y*CELL_SIZE, CELL_SIZE, CELL_SIZE,
-                                    color=(COLOR_WALL_ORANGE if (x,y) in orange else COLOR_WALL),
+                                    color=(COLOR_WALL_ORANGE if (x,y) in orange_walls else COLOR_WALL),
                                     batch=play_batch) for (x,y) in walls]
     victim_shapes = {
         p: (shapes.Circle(p[0]*CELL_SIZE + CELL_SIZE/2,
@@ -283,16 +286,3 @@ def make_rescue_triangle(play_batch, rescue_pos):
     s = CELL_SIZE * 0.9; h = s * 0.5
     return shapes.Triangle(cx, cy + h, cx - s/2, cy - h, cx + s/2, cy - h,
                            color=COLOR_RESCUE, batch=play_batch)
-
-
-
-"""....collection..."""
-
-def world():
-    return {
-        "victim_color": victim_color,
-        "generate_walls": generate_walls,
-        "place_victims": place_victims,
-        "draw_world": draw_world,
-        "make_rescue_triangle": make_rescue_triangle
-    }
