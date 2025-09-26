@@ -50,7 +50,7 @@ class AIInterface:
             "AI Helper (click or press 1–5)",
             x=20, y=WINDOW_HEIGHT - 24,
             color=(210, 210, 255, 255),
-            font_size=12, bold=True
+            font_size=12
         )
         self.question_hud.layout(20, window.height - 52)
         self.model = HFLocalLLM()
@@ -151,7 +151,8 @@ class Game:
         self.start_diffs = ["Easy", "Medium", "Hard"]
         self.start_diff_idx = 0
         self.start_view = "Local"
-        self.start_title = text.Label("Mission Setup", x=PLAY_W_PX//2, y=WINDOW_HEIGHT//2+80, anchor_x="center", color=COLOR_TEXT, font_size=28, bold=True)
+        self.start_title = text.Label("Mission Setup", x=PLAY_W_PX//2, y=WINDOW_HEIGHT//2+80, anchor_x="center", color=COLOR_TEXT, font_size=28
+                                      )
         self.start_diff_label = text.Label("", x=PLAY_W_PX//2, y=WINDOW_HEIGHT//2+30, anchor_x="center", color=COLOR_TEXT, font_size=18)
         self.start_view_label = text.Label("", x=PLAY_W_PX//2, y=WINDOW_HEIGHT//2-10, anchor_x="center", color=COLOR_TEXT, font_size=18)
         self.start_hint = text.Label("Use arrows / 1-2-3 / L-G • Press ENTER to start", x=PLAY_W_PX//2, y=WINDOW_HEIGHT//2-60, anchor_x="center", color=COLOR_TEXT, font_size=12)
@@ -247,3 +248,4 @@ class Game:
 
     def on_text_motion(self, m):
         if self.chat["focus"] and self.chat["caret"]: self.chat["caret"].on_text_motion(m)
+        

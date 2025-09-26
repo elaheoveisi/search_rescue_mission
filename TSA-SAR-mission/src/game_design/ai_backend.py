@@ -1,28 +1,12 @@
-# src/ai/ai_backend.py
+# ai_backend.py
 from __future__ import annotations
-"""
-AI backends + reasoning layer for SAR game.
-
-- BaseLLM / AIWorker: common interfaces & async worker
-- EchoLLM, HFLocalLLM (DeepSeek), LlamaCppLLM: local backends
-- World encoders + heuristic fallback + prompt builder
-- AIAgent: simple ask(game, question, on_done) entry point
-
-Design goals:
-• Use the grid/matrix internally, NEVER show it in answers.
-• Short, actionable replies; heuristic fallback if LLM fails.
-"""
-
-import threading, queue, time, json, re
-from dataclasses import dataclass
+import threading, queue, re
 from typing import Optional, Callable, List, Tuple
 
-# ======================================================================
-#                       CORE INTERFACES
-# ======================================================================
+# ---------- Base Class and Worker ----------
 
 class BaseLLM:
-    """Abstract base class for Large Language Models."""
+    """Abstract base class for Large Language Models (or stand-ins)."""
     def generate(self, prompt: str, system: Optional[str] = None) -> str:
         raise NotImplementedError
 
@@ -30,7 +14,7 @@ class AIWorker:
     """Runs LLM calls in a non-blocking background thread."""
     def __init__(self, model: "BaseLLM"):
         self.model = model
-        self._q = queue.Queue()
+        self._q: "queue.Queue[Tuple[str, Optional[str], Callable[[str], None]]]" = queue.Queue()
         self._t = threading.Thread(target=self._loop, daemon=True)
         self._t.start()
 
@@ -39,308 +23,231 @@ class AIWorker:
 
     def _loop(self):
         while True:
+            prompt, system, cb = self._q.get()
             try:
-                prompt, system, cb = self._q.get()
                 reply = self.model.generate(prompt, system=system)
-                cb(reply)
             except Exception as e:
-                import traceback
-                error_str = traceback.format_exc()
-                print(f"[AI WORKER ERROR]\n{error_str}")
-                cb(f"(AI error: {e})")
-            time.sleep(0.01)
+                reply = f"(AI error: {e})"
+            try:
+                cb(reply)
+            except Exception:
+                pass
 
-# ======================================================================
-#                       LIGHTWEIGHT LOCAL BACKENDS
-# ======================================================================
+# ---------- Utilities to parse your prompt text ----------
 
-class EchoLLM(BaseLLM):
-    """A fallback LLM that simply echoes the user's prompt."""
-    def __init__(self, note="echo backend"):
-        self.note = note
-    def generate(self, prompt: str, system: Optional[str] = None) -> str:
-        sys = f"[sys:{system}] " if system else ""
-        return f"({self.note}) {sys}You asked: {prompt}"
+def _parse_player(prompt: str) -> Optional[Tuple[int,int]]:
+    m = re.search(r"My current position is\s*\[(\s*\d+\s*),\s*(\d+)\s*\]", prompt)
+    if not m:
+        m = re.search(r"My current position is\s*\((\s*\d+\s*),\s*(\d+)\s*\)", prompt)
+    return (int(m.group(1)), int(m.group(2))) if m else None
 
-class HFLocalLLM(BaseLLM):
-    """
-    Hugging Face transformers backend.
-    Configured for DeepSeek Coder 7B Instruct.
-    """
-    def __init__(self, model_id: str = "deepseek-ai/deepseek-coder-7b-instruct", cache_dir: str = "C:/hf-cache"):
-        self.model_id = model_id
-        self.cache_dir = cache_dir
-        self._pipe = None
-        self._tok = None
-        # DeepSeek supports a longer context than tiny models
-        self.max_ctx = 4096
-        self.max_new = 512
-        self.safety_margin = 48  # buffer for special tokens
+def _parse_rescue_points(prompt: str) -> List[Tuple[int,int]]:
+    pts = []
+    m = re.search(r"Rescue points are at:\s*([^\n]+)", prompt)
+    if not m:
+        return pts
+    block = m.group(1)
+    for x,y in re.findall(r"\(\s*(\d+)\s*,\s*(\d+)\s*\)", block):
+        pts.append((int(x), int(y)))
+    return pts
 
-    def _ensure_pipe(self):
-        if self._pipe:
-            return
-        from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
-        import torch
+def _parse_matrix(prompt: str) -> List[List[int]]:
+    rows = []
+    for line in prompt.splitlines():
+        line = line.strip()
+        if line and re.fullmatch(r"[0-9]+", line):
+            rows.append([int(ch) for ch in line])
+    return rows
 
-        self._tok = AutoTokenizer.from_pretrained(self.model_id, cache_dir=self.cache_dir)
-        # Avoid attention_mask warnings: set pad token if missing
-        if self._tok.pad_token is None:
-            self._tok.pad_token = self._tok.eos_token
-
-        model = AutoModelForCausalLM.from_pretrained(
-            self.model_id,
-            torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-            device_map="auto" if torch.cuda.is_available() else None,
-            low_cpu_mem_usage=True,
-            cache_dir=self.cache_dir
-        )
-        self._pipe = pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=self._tok,
-            device=0 if torch.cuda.is_available() else -1,
-            model_kwargs={"attn_implementation": "eager"}
-        )
-
-    def _token_ids(self, text: str) -> List[int]:
-        return self._tok.encode(text, add_special_tokens=False)
-
-    def _truncate_to_tokens(self, text: str, max_tokens: int) -> str:
-        ids = self._token_ids(text)
-        if len(ids) <= max_tokens:
-            return text
-        return self._tok.decode(ids[:max_tokens], clean_up_tokenization_spaces=False)
-
-    def generate(self, prompt: str, system: Optional[str] = None) -> str:
-        self._ensure_pipe()
-        full = f"<<SYS>>\n{system}\n<</SYS>>\n\n{prompt}" if system else prompt
-
-        # keep within context budget
-        max_input_tokens = self.max_ctx - self.max_new - self.safety_margin
-        full = self._truncate_to_tokens(full, max_input_tokens)
-
-        out = self._pipe(
-            full,
-            max_new_tokens=self.max_new,
-            do_sample=False,                 # deterministic
-            pad_token_id=self._tok.eos_token_id,
-            max_length=self.max_ctx
-        )[0]["generated_text"]
-
-        return out[len(full):].strip()
-
-class LlamaCppLLM(BaseLLM):
-    """Local llama.cpp backend for running GGUF-quantized models."""
-    def __init__(self, gguf_path: str, n_ctx: int = 4096, n_gpu_layers: int = 0, n_threads: int = 4, max_tokens: int = 256):
-        from llama_cpp import Llama
-        self.max_tokens = max_tokens
-        self.llm = Llama(model_path=gguf_path, n_ctx=n_ctx, n_gpu_layers=n_gpu_layers, n_threads=n_threads)
-
-    def generate(self, prompt: str, system: Optional[str] = None) -> str:
-        full = f"<<SYS>>{system}<<EOS>>\n{prompt}" if system else prompt
-        res = self.llm(prompt=full, max_tokens=self.max_tokens, temperature=0.0, top_p=1.0)
-        return res["choices"][0]["text"].strip()
-
-# ======================================================================
-#                       REASONER LAYER (NEW)
-# ======================================================================
-
-# ----- World structures (compact, model-friendly) -----
-@dataclass
-class Victim:
-    x: int
-    y: int
-    color: str  # "red", "yellow", "purple", etc.
-
-@dataclass
-class RescuePoint:
-    x: int
-    y: int
-    label: str  # "R1", "R2", ...
-
-@dataclass
-class Hazard:
-    x: int
-    y: int
-    kind: str  # "wall", "water", "no-fly", ...
-
-@dataclass
-class AgentState:
-    x: int
-    y: int
-    heading_deg: float
-    altitude: float
-
-@dataclass
-class WorldState:
-    width: int
-    height: int
-    cell_size: int
-    agent: AgentState
-    victims: List[Victim]
-    rescue_points: List[RescuePoint]
-    hazards: List[Hazard]
-
-def encode_world(game) -> WorldState:
-    """
-    Extracts compact state from your game without exposing raw matrices to the UI.
-    Adjust field access if your attribute names differ.
-    """
-    width = getattr(game, "GRID_W", getattr(game, "width", 60))
-    height = getattr(game, "GRID_H", getattr(game, "height", 40))
-    cell_size = getattr(game, "CELL", 16)
-
-    # Agent
-    px = int(getattr(game.player, "grid_x", 0))
-    py = int(getattr(game.player, "grid_y", 0))
-    heading = float(getattr(game.player, "heading_deg", 0.0))
-    altitude = float(getattr(game.player, "altitude_agl", 100.0))
-
-    # Victims
-    victims: List[Victim] = []
-    if hasattr(game, "victims"):
-        for v in game.victims:
-            victims.append(Victim(int(getattr(v, "grid_x", 0)),
-                                  int(getattr(v, "grid_y", 0)),
-                                  str(getattr(v, "color_name", "unknown"))))
-
-    # Rescue points
-    rescue_points: List[RescuePoint] = []
-    if hasattr(game, "rescue_points"):
-        for i, r in enumerate(game.rescue_points, start=1):
-            rescue_points.append(RescuePoint(int(getattr(r, "grid_x", 0)),
-                                             int(getattr(r, "grid_y", 0)),
-                                             str(getattr(r, "label", f"R{i}"))))
-
-    # Hazards
-    hazards: List[Hazard] = []
-    if hasattr(game, "walls"):
-        for w in game.walls:
-            hazards.append(Hazard(int(getattr(w, "grid_x", 0)),
-                                  int(getattr(w, "grid_y", 0)),
-                                  "wall"))
-    if hasattr(game, "no_fly"):
-        for z in game.no_fly:
-            hazards.append(Hazard(int(getattr(z, "grid_x", 0)),
-                                  int(getattr(z, "grid_y", 0)),
-                                  "no-fly"))
-
-    return WorldState(
-        width=width,
-        height=height,
-        cell_size=cell_size,
-        agent=AgentState(px, py, heading, altitude),
-        victims=victims,
-        rescue_points=rescue_points,
-        hazards=hazards,
-    )
-
-# ----- Heuristic fallback (no LLM) -----
 def _manhattan(a: Tuple[int,int], b: Tuple[int,int]) -> int:
     return abs(a[0]-b[0]) + abs(a[1]-b[1])
 
-def heuristic_answer(state: WorldState, question: str) -> str:
-    ax, ay = state.agent.x, state.agent.y
-    lines: List[str] = []
-    q = (question or "").lower()
+# ---------- Rule-based "LLM" that always works offline ----------
 
-    if state.victims:
-        nv = min(state.victims, key=lambda v: _manhattan((ax,ay),(v.x,v.y)))
-        d = _manhattan((ax,ay), (nv.x, nv.y))
-        lines.append(f"Nearest victim ~{d} cells away near ({nv.x},{nv.y}), tag color {nv.color}.")
-    else:
-        lines.append("No victims visible in the current sector.")
-
-    if state.rescue_points:
-        nr = min(state.rescue_points, key=lambda r: _manhattan((ax,ay),(r.x,r.y)))
-        d = _manhattan((ax,ay), (nr.x, nr.y))
-        lines.append(f"Closest rescue point is {nr.label}, about {d} cells away near ({nr.x},{nr.y}).")
-    else:
-        lines.append("No rescue/triage points defined yet.")
-
-    if state.hazards:
-        near_h = [h for h in state.hazards if _manhattan((ax,ay),(h.x,h.y)) <= 6]
-        if near_h:
-            kinds = ", ".join(sorted({h.kind for h in near_h}))
-            lines.append(f"Hazards within ~6 cells: {kinds}. Maintain clearance and adjust routing.")
-        else:
-            lines.append("No immediate hazards within ~6 cells of your position.")
-    else:
-        lines.append("No hazards registered on the board.")
-
-    if any(k in q for k in ("survivor","victim")):
-        lines.append("Recommendation: move toward the nearest victim with obstacle clearance; call out if visibility changes.")
-    elif any(k in q for k in ("danger","obstacle","hazard")):
-        lines.append("Keep obstacle separation; avoid tight corridors. Announce if you need replanning.")
-    elif "rescue" in q or "evac" in q:
-        lines.append("After pickup, route to the nearest rescue point unless ATC/safety dictates otherwise.")
-
-    return " ".join(lines)
-
-# ----- Prompting discipline -----
-SYSTEM_PROMPT = (
-    "You are a concise UAS Search-and-Rescue assistant. You are given the world state as JSON.\n"
-    "CRITICAL RULES:\n"
-    "• Do NOT print raw matrices, arrays, grids, or JSON dumps unless explicitly asked.\n"
-    "• Provide practical implications: nearest victims, safe routes, hazards, rescue points, next actions.\n"
-    "• Be specific (distances in cells; cardinal hints OK) and keep answers under ~120 words.\n"
-    "• ATC typically does not track obstacles; pilots must visually avoid them.\n"
-)
-
-def build_prompt(state: WorldState, user_question: str) -> str:
-    state_json = json.dumps({
-        "grid": {"w": state.width, "h": state.height, "cell": state.cell_size},
-        "agent": {"x": state.agent.x, "y": state.agent.y, "hdg_deg": state.agent.heading_deg, "alt_agl": state.agent.altitude},
-        "victims": [{"x": v.x, "y": v.y, "color": v.color} for v in state.victims],
-        "rescue_points": [{"x": r.x, "y": r.y, "label": r.label} for r in state.rescue_points],
-        "hazards": [{"x": h.x, "y": h.y, "kind": h.kind} for h in state.hazards],
-    }, separators=(",", ":"))
-    return (
-        f"<state>{state_json}</state>\n"
-        f"<question>{(user_question or '').strip()}</question>\n"
-        "Remember the rules: do NOT reveal raw state/matrices; focus on concise, actionable guidance."
-    )
-
-def _redact_grids(text: str) -> str:
-    """Trim accidental dumps of arrays/JSON to avoid showing the matrix."""
-    if not text:
-        return text
-    if len(text) > 1500:
-        text = text[:1400] + " …"
-    # Redact long bracketed numeric lists
-    text = re.sub(r"\[[\s\d,.\-]{20,}\]", "[…redacted grid…]", text)
-    # Trim oversized JSON-like blocks but keep short snippets
-    text = re.sub(r"\{(?:[^{}]|\n){220,}\}", lambda m: m.group(0)[:200] + " …", text)
-    return text
-
-# ----- High-level Agent you call from UI/HUD -----
-class AIAgent:
+class RuleReasoner(BaseLLM):
     """
-    Usage:
-        agent = AIAgent(HFLocalLLM())  # DeepSeek by default
-        agent.ask(game, "Do you see any survivors near me?", on_done=lambda ans: chat.post("ai", ans))
+    Deterministic analyzer:
+      - Reads the matrix & positions from prompt text
+      - Computes nearest victim(s), nearest obstacle band, nearest rescue point
+      - Writes a clean, pilot-friendly description (no commands)
     """
-    def __init__(self, model: BaseLLM):
-        self.model = model
-        self.worker = AIWorker(model)
+    def generate(self, prompt: str, system: Optional[str] = None) -> str:
+        grid = _parse_matrix(prompt)
+        if not grid:
+            return "I couldn't read the map grid. Please resend the question."
 
-    def ask(self, game, question: str, on_done: Callable[[str], None]):
+        H, W = len(grid), len(grid[0])
+        me = _parse_player(prompt)
+        rescues = _parse_rescue_points(prompt)
+
+        victims = {"red": [], "purple": [], "yellow": []}
+        walls_grey, walls_orange = set(), set()
+        passable = set()
+        me_fallback = None
+
+        for y in range(H):
+            for x in range(W):
+                v = grid[y][x]
+                if v == 9: me_fallback = (x,y)
+                if v == 1: passable.add((x,y))
+                if v == 0: walls_grey.add((x,y))
+                if v == 5: walls_orange.add((x,y))
+                if v == 2: victims["red"].append((x,y))
+                if v == 3: victims["purple"].append((x,y))
+                if v == 4: victims["yellow"].append((x,y))
+
+        if me is None:
+            me = me_fallback
+
+        def _sector(p: Tuple[int,int]) -> str:
+            x,y = p
+            sx = "west" if x < W/3 else ("center" if x < 2*W/3 else "east")
+            sy = "south" if y < H/3 else ("center" if y < 2*H/3 else "north")
+            return "center" if (sx == "center" and sy == "center") else f"{sy}-{sx}"
+
+        def _nearest(me, pts):
+            if me is None or not pts: return None, None
+            best = min(pts, key=lambda p: _manhattan(me,p))
+            return best, _manhattan(me, best)
+
+        # Nearest per victim type
+        nearest_by_kind = {}
+        for k in ("red","purple","yellow"):
+            p, d = _nearest(me, victims[k])
+            if p: nearest_by_kind[k] = (p, d)
+
+        # Orange hazard summary (mode sector)
+        orange_summary = ""
+        if walls_orange:
+            from collections import Counter
+            sec, _ = Counter(_sector(p) for p in walls_orange).most_common(1)[0]
+            orange_summary = f"Orange hazard clusters are prominent around the {sec}."
+
+        # Rescue nearest
+        rescue_nearest, rescue_d = _nearest(me, rescues)
+
+        q = prompt.lower()
+        parts = []
+
+        if any(k in q for k in ("hazard", "obstacle", "wall")):
+            all_walls = list(walls_grey | walls_orange)
+            pw, dw = _nearest(me, all_walls)
+            if pw:
+                tone = "orange (significant)" if pw in walls_orange else "gray"
+                parts.append(f"The nearest obstacle is a {tone} wall near {pw[0]},{pw[1]}, approximately {dw} cells away.")
+            if orange_summary: parts.append(orange_summary)
+            elif walls_grey: parts.append("Gray walls form corridors in several areas; expect reduced maneuvering room.")
+
+        if "where" in q and "victim" in q:
+            if nearest_by_kind:
+                triples = sorted([(k, p, d) for k,(p,d) in nearest_by_kind.items()], key=lambda t: t[2])
+                k,p,d = triples[0]
+                color = {"red":"high-priority red","purple":"purple","yellow":"yellow"}[k]
+                parts.append(f"The nearest victim is a {color} at {p[0]},{p[1]}, about {d} cells from your position.")
+            all_v = victims["red"] + victims["purple"] + victims["yellow"]
+            if all_v:
+                from collections import Counter
+                sec, _ = Counter(_sector(p) for p in all_v).most_common(1)[0]
+                parts.append(f"Victims appear denser toward the {sec} sector.")
+
+        if "nearest rescue" in q or ("rescue" in q and "nearest" in q):
+            if rescue_nearest:
+                parts.append(f"The closest rescue point is around {rescue_nearest[0]},{rescue_nearest[1]} (~{rescue_d} cells).")
+            elif rescues:
+                parts.append("Rescue points are listed but I couldn’t determine the closest one.")
+            else:
+                parts.append("I don’t have rescue-point locations in this map view.")
+
+        if not parts:
+            victims_total = sum(len(v) for v in victims.values())
+            parts.append(f"The map shows {victims_total} victims distributed across the grid; "
+                         f"{len(walls_orange)} orange-wall cells indicate higher-risk structures.")
+            if orange_summary: parts.append(orange_summary)
+            if me is not None: parts.append(f"Your current cell is {me[0]},{me[1]}.")
+
+        return " ".join(parts)
+
+# ---------- DeepSeek via llama.cpp (NO transformers/torch) ----------
+
+class LlamaCppLLM(BaseLLM):
+    """
+    Runs a local GGUF with llama.cpp bindings. No API key, no torch/transformers.
+    Example model: deepseek-r1-distill-qwen-1.5b-Q4_K_M.gguf
+    """
+    def __init__(self, model_path: str, n_ctx: int = 4096, n_threads: int = 0):
         try:
-            state = encode_world(game)
-            prompt = build_prompt(state, question)
+            from llama_cpp import Llama
         except Exception as e:
-            on_done(f"(State encoding error: {e})")
+            raise RuntimeError("Please install llama-cpp-python: pip install --upgrade llama-cpp-python") from e
+        # n_threads=0 lets it auto-pick your CPU cores
+        self.llm = Llama(model_path=model_path, n_ctx=n_ctx, n_threads=n_threads)
+        self._fallback = RuleReasoner()
+
+    def generate(self, prompt: str, system: Optional[str] = None) -> str:
+        """
+        We first compute a deterministic, map-grounded summary (RuleReasoner),
+        then ask the model to rewrite/expand it as a clean paragraph with no commands.
+        """
+        base = self._fallback.generate(prompt, system)
+        sys = (system or "").strip()
+        composed = (
+            (f"<<SYS>>\n{sys}\n<</SYS>>\n" if sys else "") +
+            "Context summary (derived from the grid):\n" + base + "\n\n" +
+            "User question and map details:\n" + prompt + "\n\n" +
+            "Write ONE concise paragraph. No commands. Descriptive only."
+        )
+        out = self.llm(
+            composed,
+            max_tokens=200,
+            temperature=0.6,
+            stop=["</s>", "```"]
+        )
+        text = out["choices"][0]["text"].strip()
+        return text if text else base
+
+# ---------- Optional HF local model (can be any open-source HF model) ----------
+
+class HFLocalLLM(BaseLLM):
+    """
+    Uses a local HuggingFace model if available; otherwise falls back to RuleReasoner.
+    Default kept small; change model_id for DeepSeek HF if you prefer that route.
+    """
+    def __init__(self, model_id: str = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"):
+        self.model_id = model_id
+        self._pipe = None
+        self._fallback = RuleReasoner()
+
+    def _ensure(self):
+        if self._pipe is not None:
             return
+        try:
+            from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+            tok = AutoTokenizer.from_pretrained(self.model_id)
+            mdl = AutoModelForCausalLM.from_pretrained(self.model_id)
+            self._pipe = pipeline("text-generation", model=mdl, tokenizer=tok)
+        except Exception:
+            self._pipe = None  # stay graceful
 
-        def _finish(ans: str):
-            try:
-                if not ans or not ans.strip() or ans.strip().startswith("(AI error"):
-                    # Fallback to heuristics if model failed
-                    on_done(heuristic_answer(state, question))
-                    return
-                on_done(_redact_grids(ans))
-            except Exception as ee:
-                on_done(f"(AI fallback error: {ee})")
+    def generate(self, prompt: str, system: Optional[str] = None) -> str:
+        base = self._fallback.generate(prompt, system)
+        self._ensure()
+        if not self._pipe:
+            return base
+        system_text = (system or "").strip()
+        full = (
+            f"{system_text}\n\nContext summary:\n{base}\n\n"
+            f"User question and map details:\n{prompt}\n\n"
+            f"Rewrite a single concise paragraph (no commands, descriptive only)."
+        )
+        out = self._pipe(full, max_new_tokens=120, do_sample=True, temperature=0.6)
+        text = out[0]["generated_text"].strip()
+        # A light cleanup in case the model echoes the instruction:
+        if "Rewrite a single concise paragraph" in text:
+            text = text.split("Rewrite a single concise paragraph", 1)[-1].strip(":.- \n")
+        return text if text else base
 
-        self.worker.ask(prompt, _finish, system=SYSTEM_PROMPT)
+# ---------- Debug echo ----------
+
+class EchoLLM(BaseLLM):
+    def generate(self, prompt: str, system: Optional[str] = None) -> str:
+        return "(echo) " + (prompt[-600:] if len(prompt) > 600 else prompt)
