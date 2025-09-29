@@ -1,200 +1,410 @@
 # dual_view.py
-import argparse
 import pyglet
-from pyglet import shapes
+from pyglet import shapes, text
+from pyglet.window import key
+from pyglet import canvas
 
-# --- your modules (must be in the same folder) ---
-from game import Game                           # Pilot game (full logic)  :contentReference[oaicite:0]{index=0}
-from config import PLAY_W, PLAY_H, COLOR_TEXT, CELL_SIZE, COLOR_WALL, COLOR_RESCUE  # sizes/colors :contentReference[oaicite:1]{index=1}
-from world import victim_color                  # victim color helper       :contentReference[oaicite:2]{index=2}
+# ---- Reuse your existing modules / constants ----
+from config import (
+    PLAY_W, PLAY_H, CELL_SIZE,
+    WINDOW_WIDTH, WINDOW_HEIGHT,
+    COLOR_WALL, COLOR_RESCUE, COLOR_TEXT, COLOR_PLAYER,
+    TIME_LIMIT, START
+)
+from camera import set_play_projection, reset_ui_projection
+from grid import build_grid_lines
+from hud import build_hud
+from chatui import build_chat          # controls.py expects game.chat
+from helpers import bfs_distances
+from world import generate_walls, place_victims, draw_world, make_rescue_triangle, victim_color
+from update import tick, second
+from controls import key_press as pilot_key_press, mouse_press as pilot_mouse_press
 
-# ------------------------------
-# Rescuer (Global Overview) Window
-# ------------------------------
-class RescuerWindow(pyglet.window.Window):
-    def __init__(self, game: Game, screen=None, fullscreen=False, pos=None, size=None):
-        # Default size that scales the whole grid nicely
-        if size is None:
-            w = max(PLAY_W * 12, 800)
-            h = max(PLAY_H * 12, 600)
-        else:
-            w, h = size
+# Keep strong refs so windows aren’t GC’d
+_windows = []
 
-        super().__init__(width=int(w), height=int(h),
-                         caption="SAR Rescuer (Global View)",
-                         resizable=False, screen=screen)
-
-        if (not fullscreen) and pos:
-            try: self.set_location(int(pos[0]), int(pos[1]))
-            except Exception: pass
-
+# =========================================================
+#                    PILOT (LOCAL VIEW)
+# =========================================================
+class GamePilot:
+    """Owns the game state; interactive local view."""
+    def __init__(self, screen, fullscreen=True, x=None, y=None, w=None, h=None):
         if fullscreen:
-            self.set_fullscreen(True, screen=screen)
+            self.window = pyglet.window.Window(fullscreen=True, screen=screen, caption="Pilot (Local)")
+        else:
+            ww = w if w is not None else WINDOW_WIDTH
+            hh = h if h is not None else WINDOW_HEIGHT
+            self.window = pyglet.window.Window(ww, hh, caption="Pilot (Local)")
+            if x is not None and y is not None:
+                self.window.set_location(x, y)
+        self.window.push_handlers(self)
 
-        self.game = game
-        self.batch = pyglet.graphics.Batch()
+        # World/state
+        self.PLAY_W, self.PLAY_H = PLAY_W, PLAY_H
+        self.walls, self.orange_walls = set(), set()
+        self.victims = {}
+        self.passable = set()
 
-    # ---------- helpers ----------
-    def _cell_px(self):
-        # scale each grid cell to fit the window
-        cw = max(2, self.width // max(1, PLAY_W))
-        ch = max(2, self.height // max(1, PLAY_H))
-        return cw, ch
+        # Batches
+        self.play_batch = pyglet.graphics.Batch()
+        self.ui_batch = pyglet.graphics.Batch()
 
-    def _to_px(self, gx, gy, cw, ch):
-        return gx * cw, gy * ch
+        # Game vars
+        self.state, self.zoom, self.view_mode = "start", 1.0, "local"
+        self.time_remaining, self.game_over = TIME_LIMIT, False
+        self.player = [*START]
+        self.rescue_positions, self.rescue_shapes = [], []
+        self.carried, self.carried_shapes = [], []
 
-    def _draw_grid(self, cw, ch):
-        for gx in range(1, PLAY_W):
-            x = gx * cw
-            shapes.Line(x, 0, x, self.height, color=(70, 70, 70), batch=self.batch)
-        for gy in range(1, PLAY_H):
-            y = gy * ch
-            shapes.Line(0, y, self.width, y, color=(70, 70, 70), batch=self.batch)
+        # Drawn shapes
+        self.grid_lines = build_grid_lines(self.play_batch)
+        self.wall_shapes, self.victim_shapes = [], {}   # persistent world shapes
+        self._overlay_shapes = []                       # transient local overlay (rebuilt per frame)
 
-    def _draw_walls(self, cw, ch):
-        # We don't know which walls were colored orange in draw_world(), but we can render the structure.
-        if getattr(self.game, "walls", None):
-            for (wx, wy) in self.game.walls:
-                x, y = self._to_px(wx, wy, cw, ch)
-                shapes.Rectangle(x, y, cw, ch, color=COLOR_WALL, batch=self.batch)
+        # Player sprite (persistent, world coords)
+        self.player_shape = shapes.Rectangle(0, 0, CELL_SIZE, CELL_SIZE, color=COLOR_PLAYER, batch=self.play_batch)
 
-    def _draw_victims(self, cw, ch):
-        if getattr(self.game, "victims", None):
-            r = max(2, int(min(cw, ch) / 2) - 2)
-            for (vx, vy), kind in self.game.victims.items():
-                cx = vx * cw + cw // 2
-                cy = vy * ch + ch // 2
-                shapes.Circle(cx, cy, r, color=victim_color(kind), batch=self.batch)
+        # HUD + CHAT (controls.py expects chat dict with focus/caret)
+        self.hud = build_hud(self.ui_batch)
+        self.hud["status"].text = "Press ENTER on Start screen to begin"
+        self.chat = build_chat(self.ui_batch)
 
-    def _draw_player(self, cw, ch):
-        if getattr(self.game, "player", None):
-            px, py = self.game.player
-            x, y = self._to_px(px, py, cw, ch)
-            shapes.Rectangle(x, y, cw, ch, color=(60, 200, 255), batch=self.batch)
+        # Start screen UI
+        self.start_diffs = ["Easy", "Medium", "Hard"]
+        self.start_diff_idx = 0
+        self.start_view = "Local"
+        cx, cy = self.window.width // 2, self.window.height // 2
+        self.start_title = text.Label("Mission Setup", x=cx, y=cy + 80, anchor_x="center", color=COLOR_TEXT, font_size=28)
+        self.start_diff_label = text.Label("", x=cx, y=cy + 30, anchor_x="center", color=COLOR_TEXT, font_size=18)
+        self.start_view_label = text.Label("", x=cx, y=cy - 10, anchor_x="center", color=COLOR_TEXT, font_size=18)
+        self.start_hint = text.Label("Use 1-2-3 • ENTER to start", x=cx, y=cy - 60, anchor_x="center", color=COLOR_TEXT, font_size=12)
+        self.refresh_start_labels()
 
-            # carried indicators next to the player (max 3)
-            carried = getattr(self.game, "carried", [])
-            offs = [(-5, 6), (5, 6), (0, -6)]
-            for i, k in enumerate(carried[:3]):
-                cx = x + cw // 2 + offs[i][0]
-                cy = y + ch // 2 + offs[i][1]
-                shapes.Circle(cx, cy, max(2, int(min(cw, ch) * 0.12)),
-                              color=victim_color(k), batch=self.batch)
+        # Tickers
+        pyglet.clock.schedule_interval(lambda dt: tick(self, dt), 1 / 60.0)
+        pyglet.clock.schedule_interval(lambda dt: second(self, dt), 1.0)
 
-    def _draw_rescue_triangles(self, cw, ch):
-        # Game provides multiple rescue positions as a list (see game.rebuild_world()):contentReference[oaicite:3]{index=3}
-        rps = getattr(self.game, "rescue_positions", []) or []
-        for (gx, gy) in rps:
-            # draw a triangle centered in the cell
-            cx = gx * cw + cw / 2
-            cy = gy * ch + ch / 2
+    # ---------- world building ----------
+    def rebuild_world(self):
+        for shape_list in [self.wall_shapes, self.rescue_shapes, self.carried_shapes]:
+            for s in shape_list:
+                s.delete()
+        for c, _ in self.victim_shapes.values():
+            c.delete()
+        self.wall_shapes.clear()
+        self.victim_shapes.clear()
+        self.rescue_shapes.clear()
+        self.carried_shapes.clear()
+        self.carried = []
+
+        self.walls, self.orange_walls = generate_walls(self.difficulty)
+        self.passable = {(x, y) for x in range(PLAY_W) for y in range(PLAY_H)} - self.walls
+        distmap = bfs_distances(START, self.passable)
+        self.victims = place_victims(distmap, START, self.passable)
+
+        import random
+        pool = list(self.passable - set(self.victims.keys()) - {START})
+        self.rescue_positions = random.sample(pool, min(3, len(pool)))
+
+        self.wall_shapes, self.victim_shapes = draw_world(self.play_batch, self.walls, self.orange_walls, self.victims)
+        for rp in self.rescue_positions:
+            tri = make_rescue_triangle(self.play_batch, rp)
+            if tri:
+                self.rescue_shapes.append(tri)
+
+        self.player[:] = START
+        self.time_remaining = TIME_LIMIT
+
+    # ---------- start helpers ----------
+    def refresh_start_labels(self):
+        d = self.start_diffs[self.start_diff_idx]
+        self.start_diff_label.text = f"Difficulty:  {d}"
+        self.start_view_label.text = f"View:        {self.start_view}"
+
+    def apply_start_and_begin(self):
+        self.difficulty = self.start_diffs[self.start_diff_idx]
+        self.view_mode = "local"
+        self.rebuild_world()
+        self.state = "playing"
+        self.hud["status"].text = ""
+
+    # ---------- carrying ----------
+    def add_carried(self, kind):
+        if len(self.carried) < 3:
+            self.carried.append(kind)
+            self._sync_carried_sprites()
+
+    def drop_all_carried(self):
+        self.carried.clear()
+        self._sync_carried_sprites()
+
+    def _sync_carried_sprites(self):
+        while len(self.carried_shapes) > len(self.carried):
+            self.carried_shapes.pop().delete()
+        while len(self.carried_shapes) < len(self.carried):
+            self.carried_shapes.append(shapes.Circle(0, 0, CELL_SIZE * 0.22, batch=self.play_batch))
+        self.update_carried_position()
+        for i, kind in enumerate(self.carried):
+            self.carried_shapes[i].color = victim_color(kind)
+
+    def update_carried_position(self):
+        offs = [(-5, 6), (5, 6), (0, -6)]
+        for i, s in enumerate(self.carried_shapes):
+            s.x = self.player[0] * CELL_SIZE + CELL_SIZE / 2 + offs[i][0]
+            s.y = self.player[1] * CELL_SIZE + CELL_SIZE / 2 + offs[i][1]
+
+    # ---------- local overlay (player-centered) ----------
+    def _local_cell_px(self):
+        return CELL_SIZE, CELL_SIZE
+
+    def _local_to_px(self, gx, gy, cw, ch):
+        px, py = self.player
+        off_x = self.window.width // 2 - px * cw
+        off_y = self.window.height // 2 - py * ch
+        return gx * cw + off_x, gy * ch + off_y
+
+    def _local_draw_walls(self, cw, ch, R=5):
+        px, py = self.player
+        for (wx, wy) in self.walls:
+            if abs(wx - px) > R or abs(wy - py) > R:
+                continue
+            x, y = self._local_to_px(wx, wy, cw, ch)
+            self._overlay_shapes.append(shapes.Rectangle(x, y, cw, ch, color=COLOR_WALL, batch=self.play_batch))
+
+    def _local_draw_victims(self, cw, ch, R=5):
+        if not self.victims:
+            return
+        r = max(2, int(min(cw, ch) / 2) - 2)
+        px, py = self.player
+        for (vx, vy), kind in self.victims.items():
+            if abs(vx - px) > R or abs(vy - py) > R:
+                continue
+            cx, cy = self._local_to_px(vx, vy, cw, ch)
+            cx += cw // 2
+            cy += ch // 2
+            self._overlay_shapes.append(shapes.Circle(cx, cy, r, color=victim_color(kind), batch=self.play_batch))
+
+    def _local_draw_rescues(self, cw, ch, R=5):
+        for (gx, gy) in self.rescue_positions:
+            px, py = self.player
+            if abs(gx - px) > R or abs(gy - py) > R:
+                continue
+            cx, cy = self._local_to_px(gx, gy, cw, ch)
             s = min(cw, ch) * 0.9
             h = s * 0.5
-            shapes.Triangle(cx, cy + h, cx - s/2, cy - h, cx + s/2, cy - h,
-                            color=COLOR_RESCUE, batch=self.batch)
+            self._overlay_shapes.append(
+                shapes.Triangle(cx, cy + h, cx - s / 2, cy - h, cx + s / 2, cy - h, color=COLOR_RESCUE, batch=self.play_batch)
+            )
 
-    def _draw_status_text(self):
-        # Time remaining & victim counts (read from the Pilot game state):contentReference[oaicite:4]{index=4}:contentReference[oaicite:5]{index=5}
-        time_left = getattr(self.game, "time_remaining", 0)
-        vs = getattr(self.game, "victims", {})
-        reds = sum(1 for k in vs.values() if k == "red")
-        purp = sum(1 for k in vs.values() if k == "purple")
-        yell = sum(1 for k in vs.values() if k == "yellow")
+    def _local_draw_player(self, cw, ch):
+        x = self.window.width // 2
+        y = self.window.height // 2
+        self._overlay_shapes.append(shapes.Rectangle(x - cw // 2, y - ch // 2, cw, ch, color=(60, 200, 255), batch=self.play_batch))
+        offs = [(-5, 6), (5, 6), (0, -6)]
+        for i, k in enumerate(self.carried[:3]):
+            cx, cy = x + offs[i][0], y + offs[i][1]
+            self._overlay_shapes.append(shapes.Circle(cx, cy, max(2, int(min(cw, ch) * 0.12)), color=victim_color(k), batch=self.play_batch))
 
-        status = f"Time: {max(0, int(time_left))}s   Victims left (R/P/Y): {reds}/{purp}/{yell}"
-        pyglet.text.Label(
-            status, x=10, y=self.height - 10,
-            anchor_x='left', anchor_y='top',
-            color=COLOR_TEXT, font_name="Arial", font_size=12,
-            batch=self.batch
-        )
+    def _build_local_overlay(self):
+        cw, ch = self._local_cell_px()
+        self._local_draw_walls(cw, ch)
+        self._local_draw_victims(cw, ch)
+        self._local_draw_rescues(cw, ch)
+        self._local_draw_player(cw, ch)
 
-    # ---------- draw ----------
+    # ---------- drawing ----------
     def on_draw(self):
-        self.clear()
-        self.batch = pyglet.graphics.Batch()
+        self.window.switch_to()  # ensure this window's GL context is current
 
-        cw, ch = self._cell_px()
-        self._draw_grid(cw, ch)
-        self._draw_walls(cw, ch)             # NEW: walls
-        self._draw_victims(cw, ch)
-        self._draw_player(cw, ch)
-        self._draw_rescue_triangles(cw, ch)  # NEW: rescue triangles
-        self._draw_status_text()             # NEW: time & counts
+        # clear last frame overlay
+        for s in self._overlay_shapes:
+            try:
+                s.delete()
+            except:
+                pass
+        self._overlay_shapes.clear()
 
-        self.batch.draw()
+        self.window.clear()
+        set_play_projection(self.window, self.player, self.view_mode, self.zoom)
+
+        if self.state == "playing":
+            self._build_local_overlay()
+
+        self.play_batch.draw()
+        reset_ui_projection(self.window)
+        self.ui_batch.draw()
+
+        if self.state == "start":
+            self.start_title.draw()
+            self.start_diff_label.draw()
+            self.start_view_label.draw()
+            self.start_hint.draw()
+
+    # ---------- input (pilot only) ----------
+    def on_key_press(self, symbol, modifiers):
+        if self.state == "start":
+            if symbol == key.ENTER:
+                self.apply_start_and_begin()
+                return
+            if symbol in (key._1, key.NUM_1):
+                self.start_diff_idx = 0
+                self.refresh_start_labels()
+                return
+            if symbol in (key._2, key.NUM_2):
+                self.start_diff_idx = 1
+                self.refresh_start_labels()
+                return
+            if symbol in (key._3, key.NUM_3):
+                self.start_diff_idx = 2
+                self.refresh_start_labels()
+                return
+            return
+        pilot_key_press(self, symbol, modifiers)
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        pilot_mouse_press(self, x, y, button, modifiers)
+
+    # --- caret passthrough for chat entry (controls.py expects this) ---
+    def on_text(self, s):
+        if self.chat["focus"] and self.chat["caret"]:
+            self.chat["caret"].on_text(s)
+
+    def on_text_motion(self, m):
+        if self.chat["focus"] and self.chat["caret"]:
+            self.chat["caret"].on_text_motion(m)
 
 
-def pick_screen(index: int | None):
-    """Return pyglet screen by index (or None if invalid)."""
-    if index is None:
-        return None
-    try:
-        display = pyglet.canvas.get_display()
-        screens = display.get_screens()
-        if 0 <= index < len(screens):
-            return screens[index]
-    except Exception:
+# =========================================================
+#                 RESCUER (GLOBAL VIEW)
+# =========================================================
+class RescuerView:
+    """Read-only global map that mirrors the pilot state."""
+    def __init__(self, pilot: GamePilot, screen, fullscreen=True, x=None, y=None, w=None, h=None):
+        self.pilot = pilot
+        if fullscreen:
+            self.window = pyglet.window.Window(fullscreen=True, screen=screen, caption="Rescuer (Global)")
+        else:
+            ww = w if w is not None else WINDOW_WIDTH
+            hh = h if h is not None else WINDOW_HEIGHT
+            self.window = pyglet.window.Window(ww, hh, caption="Rescuer (Global)")
+            if x is not None and y is not None:
+                self.window.set_location(x, y)
+        self.window.push_handlers(self)
+
+        self.play_batch = pyglet.graphics.Batch()
+        self.ui_batch = pyglet.graphics.Batch()
+        self._frame_shapes = []
+
+        # A little status label (shows "waiting" if pilot hasn't started yet)
+        self.title = text.Label("Rescuer Global View (read-only)",
+                                x=20, y=self.window.height - 28,
+                                color=(210, 210, 255, 255), font_size=12)
+        self.waiting = text.Label("Waiting for Pilot to start (press ENTER in Pilot window)",
+                                  x=20, y=self.window.height - 52,
+                                  color=(210, 210, 210, 255), font_size=10)
+
+    def _clear_frame(self):
+        for s in self._frame_shapes:
+            try:
+                s.delete()
+            except:
+                pass
+        self._frame_shapes.clear()
+
+    def _draw_global(self):
+        cw = CELL_SIZE
+        ch = CELL_SIZE
+
+        # Walls
+        for (wx, wy) in self.pilot.walls:
+            self._frame_shapes.append(shapes.Rectangle(wx * cw, wy * ch, cw, ch, color=COLOR_WALL, batch=self.play_batch))
+
+        # Victims
+        r = max(2, int(min(cw, ch) / 2) - 2)
+        for (vx, vy), kind in self.pilot.victims.items():
+            cx = vx * cw + cw // 2
+            cy = vy * ch + ch // 2
+            self._frame_shapes.append(shapes.Circle(cx, cy, r, color=victim_color(kind), batch=self.play_batch))
+
+        # Rescue points
+        for (gx, gy) in self.pilot.rescue_positions:
+            cx = gx * cw
+            cy = gy * ch
+            s = min(cw, ch) * 0.9
+            h = s * 0.5
+            self._frame_shapes.append(
+                shapes.Triangle(cx, cy + h, cx - s / 2, cy - h, cx + s / 2, cy - h, color=COLOR_RESCUE, batch=self.play_batch)
+            )
+
+        # Player
+        px, py = self.pilot.player
+        self._frame_shapes.append(shapes.Rectangle(px * cw, py * ch, cw, ch, color=(60, 200, 255), batch=self.play_batch))
+
+        # Carried markers
+        offs = [(-5, 6), (5, 6), (0, -6)]
+        cxp = px * cw + cw // 2
+        cyp = py * ch + ch // 2
+        for i, k in enumerate(self.pilot.carried[:3]):
+            self._frame_shapes.append(
+                shapes.Circle(cxp + offs[i][0], cyp + offs[i][1], max(2, int(min(cw, ch) * 0.12)), color=victim_color(k), batch=self.play_batch)
+            )
+
+    def on_draw(self):
+        self.window.switch_to()  # ensure this window's GL context is current
+
+        self._clear_frame()
+        self.window.clear()
+
+        # Use the "global" camera to scale the entire playfield to this window
+        set_play_projection(self.window, self.pilot.player, "global", 1.0)
+
+        # If the pilot hasn't started yet, show a helpful hint. Otherwise draw the map.
+        if self.pilot.state != "playing":
+            # Still draw title in UI projection
+            reset_ui_projection(self.window)
+            self.title.draw()
+            self.waiting.draw()
+        else:
+            self._draw_global()
+            self.play_batch.draw()
+            reset_ui_projection(self.window)
+            self.ui_batch.draw()
+            self.title.draw()
+
+    # read-only for now, BUT forward keyboard to Pilot so movement works even if this window is focused
+    def on_key_press(self, symbol, modifiers):
+        pilot_key_press(self.pilot, symbol, modifiers)
+
+    def on_mouse_press(self, x, y, button, modifiers):
+        # No mouse controls for rescuer yet
         pass
-    return None
 
 
+# =========================================================
+#                        ENTRYPOINT
+# =========================================================
 def main():
-    parser = argparse.ArgumentParser(
-        description="Run SAR Pilot (interactive) + Rescuer (global) on one PC with two monitors."
-    )
-    parser.add_argument("--pilot-screen", type=int, default=None,
-                        help="Monitor index for the Pilot (0-based).")
-    parser.add_argument("--rescuer-screen", type=int, default=None,
-                        help="Monitor index for the Rescuer (0-based).")
-    parser.add_argument("--pilot-fullscreen", action="store_true",
-                        help="Pilot fullscreen on its monitor.")
-    parser.add_argument("--rescuer-fullscreen", action="store_true",
-                        help="Rescuer fullscreen on its monitor.")
-    parser.add_argument("--pilot-x", type=int, help="Pilot window X.")
-    parser.add_argument("--pilot-y", type=int, help="Pilot window Y.")
-    parser.add_argument("--rescuer-x", type=int, help="Rescuer window X.")
-    parser.add_argument("--rescuer-y", type=int, help="Rescuer window Y.")
-    parser.add_argument("--rescuer-w", type=int, help="Rescuer window width.")
-    parser.add_argument("--rescuer-h", type=int, help="Rescuer window height.")
-    parser.add_argument("--pilot-default-local", action="store_true",
-                        help="Force Pilot to start in Local camera mode.")
+    disp = canvas.get_display()
+    screens = disp.get_screens()
 
-    args = parser.parse_args()
-
-    # 1) Pilot (interactive, full game)
-    game = Game()  # uses your existing logic, HUD, controls, timers, etc. :contentReference[oaicite:6]{index=6}
-
-    pilot_screen = pick_screen(args.pilot_screen)
-    if args.pilot_fullscreen:
-        game.window.set_fullscreen(True, screen=pilot_screen)
+    if len(screens) >= 2:
+        # Two monitors → fullscreen on each
+        pilot = GamePilot(screen=screens[0], fullscreen=True)
+        rescuer = RescuerView(pilot, screen=screens[1], fullscreen=True)
+        _windows.extend([pilot, rescuer])
     else:
-        if args.pilot_x is not None and args.pilot_y is not None:
-            try: game.window.set_location(int(args.pilot_x), int(args.pilot_y))
-            except Exception: pass
-        elif pilot_screen is not None:
-            try: game.window.set_location(pilot_screen.x + 50, pilot_screen.y + 50)
-            except Exception: pass
+        # One monitor → two windows side-by-side, sized to fit the screen
+        screen = screens[0]
+        sw, sh = screen.width, screen.height
 
-    # Optionally force Pilot to Local camera before starting (you also have Start screen toggles):contentReference[oaicite:7]{index=7}:contentReference[oaicite:8]{index=8}
-    if args.pilot_default_local and hasattr(game, "view_mode"):
-        game.view_mode = "local"
-        if "labels" in game.hud and "view" in game.hud["labels"]:
-            game.hud["labels"]["view"].text = f"View: {game.view_mode.capitalize()}"
+        # Fit two windows across the width; keep at least 400px each
+        half_w = max(400, sw // 2)
+        win_h = min(max(400, WINDOW_HEIGHT), sh)
 
-    # 2) Rescuer (global, read-only, mirrors the Pilot's state)
-    rescuer_screen = pick_screen(args.rescuer_screen)
-    rescuer_size = (args.rescuer_w, args.rescuer_h) if args.rescuer_w and args.rescuer_h else None
-    rescuer_pos = (args.rescuer_x, args.rescuer_y) if args.rescuer_x is not None and args.rescuer_y is not None else None
-
-    rescuer = RescuerWindow(
-        game=game,
-        screen=rescuer_screen,
-        fullscreen=args.rescuer_fullscreen,
-        pos=rescuer_pos,
-        size=rescuer_size
-    )
+        # Left = Pilot, Right = Rescuer
+        pilot = GamePilot(screen=screen, fullscreen=False, x=0, y=0, w=half_w, h=win_h)
+        rescuer = RescuerView(pilot, screen=screen, fullscreen=False, x=half_w, y=0, w=half_w, h=win_h)
+        _windows.extend([pilot, rescuer])
 
     pyglet.app.run()
 

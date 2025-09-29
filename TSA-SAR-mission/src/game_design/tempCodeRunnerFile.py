@@ -1,15 +1,2 @@
-# main.py
-import pyglet, argparse
-from game import Game
-
-
-
-def run_sar_mission_game():
-    game = Game()
-    pyglet.app.run()
-
-if __name__ == "__main__":
-    run_sar_mission_game()
-
-
-
+        # Assume self.walls, self.victims, self.rescue_positions, self.player are initialized
+        # Assume self.hud contains HUD elements like labels
