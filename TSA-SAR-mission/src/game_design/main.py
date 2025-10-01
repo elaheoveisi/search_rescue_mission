@@ -3,7 +3,6 @@ import argparse
 import pyglet
 
 from game import Game
-# We reuse the dual-view entrypoint you already have:
 from dual_view import main as run_dual  # dual-view launcher
 
 def run_sar_mission_game(dual: bool):
@@ -20,9 +19,4 @@ if __name__ == "__main__":
     parser.add_argument("--dual", action="store_true",
                         help="Run in dual-view (Pilot+Rescuer) mode on one computer.")
     args = parser.parse_args()
-    run_sar_mission_game(dual=args.dual))
-
-
-
-
-
+    run_sar_mission_game(dual=args.dual)

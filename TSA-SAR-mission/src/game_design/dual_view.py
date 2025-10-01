@@ -393,7 +393,6 @@ def main():
         rescuer = RescuerView(pilot, screen=screens[1], fullscreen=True)
         _windows.extend([pilot, rescuer])
     else:
-        # One monitor → two windows side-by-side, sized to fit the screen
         screen = screens[0]
         sw, sh = screen.width, screen.height
 
