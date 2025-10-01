@@ -84,28 +84,13 @@ def set_play_projection(window, player, view_mode, zoom):
             bottom = min(world_h - h, bottom + stride_y)
 
         # --- One-cell pan when the player enters the edge cell(s)
-        EDGE_STEP = CELL_SIZE   # move exactly one grid cell
-        EDGE_CELLS = 1          # how many cells near each edge count as "edge"
+        #EDGE_STEP = CELL_SIZE   # move exactly one grid cell
+    # --- Always center the 5x5 (or 7x7) window on the player
+    left = max(0, min(cx - w // 2, world_w - w))
+    bottom = max(0, min(cy - h // 2, world_h - h))
 
-        left_edge   = left   + EDGE_CELLS * CELL_SIZE
-        right_edge  = left   + w - EDGE_CELLS * CELL_SIZE
-        bottom_edge = bottom + EDGE_CELLS * CELL_SIZE
-        top_edge    = bottom + h - EDGE_CELLS * CELL_SIZE
+    cam["left"], cam["bottom"] = left, bottom
 
-        # Horizontal panning (one cell)
-        if cx < left_edge:
-            left = max(0, left - EDGE_STEP)
-        elif cx > right_edge:
-            left = min(world_w - w, left + EDGE_STEP)
-
-        # Vertical panning (one cell)
-        if cy < bottom_edge:
-            bottom = max(0, bottom - EDGE_STEP)
-        elif cy > top_edge:
-            bottom = min(world_h - h, bottom + EDGE_STEP)
-
-        # Save updated origin
-        cam["left"], cam["bottom"] = left, bottom
 
     # Final projection using the zoom-aware visible window
     right = left + w
