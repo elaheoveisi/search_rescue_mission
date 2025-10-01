@@ -1,3 +1,4 @@
+# world.py
 import random
 from pyglet import shapes
 from config import (
@@ -21,26 +22,19 @@ from config import (
 from config import PROTECTED_CELLS
 
 # -------- small helpers --------
-def victim_color(k): 
-    return COLOR_YELLOW if k == "yellow" else (COLOR_PURPLE if k == "purple" else COLOR_RED)
-
-def _in(x, y): 
-    return 0 <= x < PLAY_W and 0 <= y < PLAY_H
-
+def victim_color(k): return COLOR_YELLOW if k == "yellow" else (COLOR_PURPLE if k == "purple" else COLOR_RED)
+def _in(x, y): return 0 <= x < PLAY_W and 0 <= y < PLAY_H
 def _border_cells():
     return {(x, 0) for x in range(PLAY_W)} | {(x, PLAY_H-1) for x in range(PLAY_W)} | \
            {(0, y) for y in range(PLAY_H)} | {(PLAY_W-1, y) for y in range(PLAY_H)}
-
 def _buf(cells, r=WALL_CLEARANCE):
     out = set()
     for x, y in cells:
         for dx in range(-r, r + 1):
             for dy in range(-r, r + 1):
                 nx, ny = x + dx, y + dy
-                if _in(nx, ny): 
-                    out.add((nx, ny))
+                if _in(nx, ny): out.add((nx, ny))
     return out
-
 def _comps(wset):
     vis, comps = set(), []
     for c in wset:
@@ -61,6 +55,7 @@ def generate_walls(difficulty: str):
     cfg = DIFFICULTIES[difficulty]
     rng = random.Random(cfg.get("seed", None))
 
+    # per-difficulty overrides (fallback to global config knobs)
     min_passable = float(cfg.get("min_passable_ratio", MIN_PASSABLE_RATIO))
     multi_pct    = float(cfg.get("multi_wall_pct",   MULTI_WALL_PCT))
     layers_min, layers_max = tuple(cfg.get("layers", MULTI_WALL_LAYERS))
@@ -78,11 +73,11 @@ def generate_walls(difficulty: str):
     reserved |= _buf({START}, max(2, WALL_CLEARANCE))
     reserved |= set(PROTECTED_CELLS)
 
-    # 2) random segments
+    # 2) random segments with clearance + budget
     segs = int(cfg.get("segments", 120))
     attempts = segs * int(WALL_ATTEMPTS_PER_SEG)
     placed = 0
-    dirs = [(1,0), (-1,0), (0,1), (0,-1)]
+    dirs = [(1,0), (-1,0), (0,1), (0,-1)] #possible directions
     min_len, max_len = WALL_SEGMENT_LEN
 
     while placed < segs and attempts > 0 and len(walls) < max_walls:
@@ -95,11 +90,11 @@ def generate_walls(difficulty: str):
         prop = []
         x, y = sx, sy
         ok = True
-        for _ in range(length):
+        for _ in range(length):              #ensures only valid, non-overlapping wall segments
             if not _in(x, y) or (x, y) == START or (x, y) in reserved or (x, y) in walls:
                 ok = False; break
             prop.append((x, y)); x += dx; y += dy
-        if not ok or not prop or any(p in walls for p in _buf(prop)): continue
+        if not ok or not prop or any(p in walls for p in _buf(prop)): continue   #buffer overlap
 
         if not can_add(len(prop)):
             need = max(0, max_walls - len(walls))
@@ -118,7 +113,7 @@ def generate_walls(difficulty: str):
             layers = random.randint(int(layers_min), int(layers_max))
             for _ in range(layers):
                 if len(walls) >= max_walls: break
-                comp_buf = _buf(comp)
+                comp_buf = _buf(comp)  # allow growth inside own buffer
                 rim = set()
                 for x, y in comp:
                     for nx, ny in ((x+1,y),(x-1,y),(x,y+1),(x,y-1)):
@@ -135,7 +130,7 @@ def generate_walls(difficulty: str):
                 if not add: break
                 walls.update(add); reserved |= _buf(add); comp.update(add)
 
-    # 4) Determine orange walls
+    # 4) Determine which wall components are orange
     wall_comps = _comps(walls)
     orange_walls = set()
     if wall_comps:
@@ -148,29 +143,32 @@ def generate_walls(difficulty: str):
     return walls, orange_walls
 
 # -------- victim placement --------
-def place_victims(distmap, start, all_passable=None):
-    """Place red, purple, yellow victims according to rules."""
+def place_victims(distmap, start, all_passable=None):  #distmap: how far every cell is from start
+    """
+    Reds: sector-quota, farthest quantile, spaced.
+    Purples & Yellows: also sector-based quotas for better distribution.
+    """
     rng = random.Random(99)
     victims = {}
 
-    pool = [p for p in distmap.keys() if p != start]
+    # Candidate pool (choose which cells get victims, while respecting rules (not on START, not blocked, spread by sector)
+    pool = [p for p in distmap.keys() if p != start]  #pool = the initial list of candidate cells where victims could be placed.
     if all_passable is not None:
         extras = list((all_passable - set(pool)) - {start})
         rng.shuffle(extras); pool += extras
     if not pool: return victims
 
-    # Reds
+    # ---------------- REDS ----------------
     dists = {p: distmap.get(p, 0) for p in pool}
     scored_linear = sorted(((p, dists[p]) for p in pool), key=lambda t: t[1])
     q_idx = int(len(scored_linear) * float(RED_FAR_QUANTILE))
-    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0
+    cutoff = scored_linear[q_idx][1] if 0 <= q_idx < len(scored_linear) else 0  #cutoff distance
     far = [p for (p, d) in scored_linear if d >= cutoff]
     if len(far) < max(NUM_RED, 8):
         far += [p for p, _ in reversed(scored_linear) if p not in far]
 
     passable = set(all_passable) if all_passable is not None else set(p for p, _ in scored_linear)
-
-    dirs4 = ((1,0),(-1,0),(0,1),(0,-1))
+    dirs4 = ((1,0),(-1,0),(0,1),(-1,0))
     def degree(p):
         x,y=p; return sum(((x+dx,y+dy) in passable) for dx,dy in dirs4)
     def is_corridor(p):
@@ -194,7 +192,6 @@ def place_victims(distmap, start, all_passable=None):
         sx = min(SX-1, (p[0] * SX) // max(1, PLAY_W))
         sy = min(SY-1, (p[1] * SY) // max(1, PLAY_H))
         return int(sx), int(sy)
-
     sector_count = SX * SY
     buckets = {i: [] for i in range(sector_count)}
     for p in far:
@@ -230,10 +227,9 @@ def place_victims(distmap, start, all_passable=None):
             if len(reds) >= NUM_RED: break
             if all(cheby(p,q) >= 2 for q in reds): reds.append(p)
 
-    for p in reds[:NUM_RED]: 
-        victims[p] = "red"
+    for p in reds[:NUM_RED]: victims[p] = "red"
 
-    # Purples & Yellows
+    # ---------------- PURPLES & YELLOWS ----------------
     def distribute_victims(candidates, num, SX, SY, kind):
         local = {}
         if not candidates or num <= 0: return local
@@ -270,6 +266,7 @@ def place_victims(distmap, start, all_passable=None):
 
 # -------- drawing --------
 def draw_world(play_batch, walls, orange_walls, victims):
+    """Draws walls (coloring orange ones differently) and victims."""
     wall_shapes = [shapes.Rectangle(x*CELL_SIZE, y*CELL_SIZE, CELL_SIZE, CELL_SIZE,
                                     color=(COLOR_WALL_ORANGE if (x,y) in orange_walls else COLOR_WALL),
                                     batch=play_batch) for (x,y) in walls]
@@ -289,18 +286,3 @@ def make_rescue_triangle(play_batch, rescue_pos):
     s = CELL_SIZE * 0.9; h = s * 0.5
     return shapes.Triangle(cx, cy + h, cx - s/2, cy - h, cx + s/2, cy - h,
                            color=COLOR_RESCUE, batch=play_batch)
-
-# -------- rescue placement --------
-def choose_rescue_positions(passable, walls, victims, start, num=3):
-    """
-    Pick safe rescue positions: not overlapping victims/walls and at least
-    1-cell clearance from walls and victims.
-    """
-    pool = [p for p in passable - set(victims.keys()) - {start}
-            if all((p[0]+dx, p[1]+dy) not in walls and (p[0]+dx, p[1]+dy) not in victims
-                   for dx, dy in [(0,0),(1,0),(-1,0),(0,1),(0,-1)])]
-
-    if not pool:
-        return []
-
-    return random.sample(pool, min(num, len(pool)))

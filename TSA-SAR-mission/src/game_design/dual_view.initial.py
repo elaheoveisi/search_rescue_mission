@@ -7,13 +7,16 @@ from camera import reset_ui_projection
 from world import victim_color
 from hud import build_hud
 from grid import build_grid_lines
-from config import CELL_SIZE, COLOR_WALL, COLOR_RESCUE, COLOR_PLAYER, WINDOW_WIDTH, WINDOW_HEIGHT
+from config import (
+    CELL_SIZE, COLOR_WALL, COLOR_RESCUE, COLOR_PLAYER,
+    WINDOW_WIDTH, WINDOW_HEIGHT, PLAY_W_PX, SIDEBAR_W
+)
 
 _windows = []
 
 
 class RescuerView:
-    """Global map that mirrors the pilot game, no sidebar (HUD overlay only)."""
+    """Global map that mirrors the pilot game, with full HUD and sidebar."""
     def __init__(self, pilot: Game, x=200, y=200, w=WINDOW_WIDTH, h=WINDOW_HEIGHT):
         self.pilot = pilot
         self.window = pyglet.window.Window(w, h, caption="Rescuer (Global)")
@@ -25,7 +28,7 @@ class RescuerView:
         self._frame_shapes = []
         self.grid_lines = []
 
-        # HUD overlay (drawn over playfield)
+        # HUD identical to Pilot
         self.hud = build_hud(self.ui_batch)
 
     def _clear_frame(self):
@@ -55,7 +58,7 @@ class RescuerView:
                 shapes.Circle(cx, cy, r, color=victim_color(kind), batch=self.play_batch)
             )
 
-        # Rescue points (centered, same as Pilot)
+        # Rescue points (fixed: centered like Pilot)
         for (gx, gy) in self.pilot.rescue_positions:
             cx = gx * cw + cw // 2
             cy = gy * ch + ch // 2
@@ -81,8 +84,8 @@ class RescuerView:
         self._clear_frame()
         self.window.clear()
 
-        # Full window projection for rescuer (no sidebar)
-        world_w = WINDOW_WIDTH
+        # Projection for playfield only (leave room for sidebar HUD)
+        world_w = PLAY_W_PX
         world_h = WINDOW_HEIGHT
         self.window.projection = pyglet.math.Mat4.orthogonal_projection(
             0, world_w, 0, world_h, -1.0, 1.0
@@ -92,7 +95,7 @@ class RescuerView:
             self._draw_global()
             self.play_batch.draw()
 
-        # HUD drawn as overlay
+        # Reset projection for HUD (drawn in sidebar)
         reset_ui_projection(self.window)
         self.ui_batch.draw()
 
@@ -113,12 +116,12 @@ class RescuerView:
 def main():
     screen = canvas.get_display().get_screens()[0]
 
-    # Pilot window (with sidebar)
+    # Pilot window
     pilot = Game()
     pilot.window.set_size(WINDOW_WIDTH, WINDOW_HEIGHT)
     pilot.window.set_location(50, 50)
 
-    # Rescuer window (full map, HUD overlay)
+    # Rescuer window
     rescuer = RescuerView(pilot, x=200, y=200, w=WINDOW_WIDTH, h=WINDOW_HEIGHT)
 
     _windows.extend([pilot, rescuer])
