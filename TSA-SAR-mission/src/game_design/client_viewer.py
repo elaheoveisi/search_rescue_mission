@@ -1,9 +1,8 @@
-import socket, json, threading
+import socket, json, threading, pyglet
 from dual_view import RescuerView
 from game import Game
-import pyglet
 
-HOST = '192.168.1.100'  # <-- replace with HOST computer’s IP
+HOST = '10.227.97.67'  
 PORT = 5050
 
 def receive_state(rescuer, conn):
@@ -16,7 +15,6 @@ def receive_state(rescuer, conn):
         while "\n" in buffer:
             line, buffer = buffer.split("\n", 1)
             state = json.loads(line)
-            # sync rescuer view with pilot state
             p = rescuer.pilot
             p.player = state["player"]
             p.victims = state["victims"]
@@ -29,10 +27,19 @@ def main():
     conn = socket.create_connection((HOST, PORT))
     print(f"[CLIENT] Connected to {HOST}:{PORT}")
 
-    pilot_stub = Game()  # a dummy game used for rendering only
-    rescuer = RescuerView(pilot_stub)
+    pilot_game = Game()
 
+    pilot_game.window.set_visible(False)
+
+    pilot_game.window.switch_to()
+    pilot_game.window.context.set_current()
+
+    
+    rescuer = RescuerView(pilot_game)
+
+  
     threading.Thread(target=receive_state, args=(rescuer, conn), daemon=True).start()
+
     pyglet.app.run()
 
 if __name__ == "__main__":
