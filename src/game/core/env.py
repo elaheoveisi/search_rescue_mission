@@ -10,7 +10,7 @@ class SAREnv(MiniGridEnv):
     def __init__(
         self,
         grid_size=10,
-        screen_size=600,
+        screen_size=1200,
         agent_start_pos=(1, 1),
         agent_start_dir=0,
         max_steps: int | None = None,
@@ -27,8 +27,6 @@ class SAREnv(MiniGridEnv):
         super().__init__(
             mission_space=mission_space,
             grid_size=grid_size,
-            # Set this to True for maximum speed
-            see_through_walls=True,
             max_steps=max_steps,
             **kwargs,
         )
