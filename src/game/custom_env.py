@@ -43,6 +43,7 @@ class MultiRoomDifficultyEnv(SAREnv):
     def __init__(self, difficulty="easy", render_mode="human"):
         self.difficulty = difficulty
         self.room_size = 5
+        self.step_count = 0
 
         if difficulty == "easy":
             self.room_count = 4
