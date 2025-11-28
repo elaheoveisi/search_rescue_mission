@@ -25,7 +25,9 @@ with skip_run("skip", "minigrid_sar") as check, check():
     manual_control.start()
 
 with skip_run("run", "sar_gui") as check, check():
-    env = MultiRoomDifficultyEnv(difficulty="hard", render_mode="rgb_array")
+    env = MultiRoomDifficultyEnv(
+        difficulty="hard", render_mode="rgb_array", tile_size=64
+    )
 
-    gui = SAREnvGUI(env)  # Pass SAREnv as a composition
+    gui = SAREnvGUI(env)
     gui.run()

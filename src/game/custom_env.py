@@ -40,7 +40,7 @@ class TestEnv(SAREnv):
 
 
 class MultiRoomDifficultyEnv(SAREnv):
-    def __init__(self, difficulty="easy", render_mode="human"):
+    def __init__(self, difficulty="easy", render_mode="human", **kwargs):
         self.difficulty = difficulty
         self.room_size = 5
         self.step_count = 0
@@ -78,6 +78,7 @@ class MultiRoomDifficultyEnv(SAREnv):
             see_through_walls=False,
             agent_view_size=7,
             render_mode=render_mode,
+            **kwargs,
         )
 
     def _gen_grid(self, width, height):

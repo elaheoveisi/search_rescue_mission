@@ -26,8 +26,6 @@ class SARVictim(WorldObj):
 
     def render(self, img):
         # Draw upright T
-        # Vertical bar
         fill_coords(img, point_in_rect(0.45, 0.55, 0.2, 0.8), (255, 0, 0))
-        # Horizontal bar
         fill_coords(img, point_in_rect(0.25, 0.75, 0.2, 0.3), (255, 0, 0))
         return img

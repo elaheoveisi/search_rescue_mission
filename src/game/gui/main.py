@@ -10,19 +10,24 @@ pygame.init()
 
 class SAREnvGUI:
     def __init__(self, env):
-        self.window = None
-        self.clock = None
         self.user = User(env)
-        self.manager = pygame_gui.UIManager(
-            (self.user.env.screen_size, self.user.env.screen_size)
-        )
+        self.env_size = self.user.env.screen_size
+
+        self.panel_width = 400
+        self.window_size = (self.env_size + self.panel_width, self.env_size)
+        self.manager = pygame_gui.UIManager(self.window_size)
+
+        # Create window and UI manager using new size
+        self.window = pygame.display.set_mode(self.window_size)
+
         self.running = True
+        self.clock = None
 
         # Initialize the window and clock
         self._init_window()
 
         # Create GUI buttons for manual control
-        self.elements = generate_elements(self.manager)
+        self.elements = generate_elements(self.manager, self.env_size, self.panel_width)
 
     def _init_window(self):
         """Initialize the Pygame window if it isn't already initialized."""
