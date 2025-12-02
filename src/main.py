@@ -1,5 +1,6 @@
 import yaml
 from minigrid.manual_control import ManualControl
+import pygame
 
 from game.custom_env import MultiRoomDifficultyEnv, TestEnv
 from game.gui.main import SAREnvGUI
@@ -28,6 +29,7 @@ with skip_run("run", "sar_gui") as check, check():
     env = MultiRoomDifficultyEnv(
         difficulty="hard", render_mode="rgb_array", tile_size=64
     )
+    print(env.window)
 
     gui = SAREnvGUI(env)
     gui.run()

@@ -10,9 +10,10 @@ class SAREnv(MiniGridEnv):
     def __init__(
         self,
         grid_size=10,
-        screen_size=1200,
+        screen_size=800,
         agent_start_pos=(1, 1),
         agent_start_dir=0,
+        window=None,
         max_steps: int | None = None,
         **kwargs,
     ):
@@ -30,7 +31,7 @@ class SAREnv(MiniGridEnv):
             max_steps=max_steps,
             **kwargs,
         )
-
+        self.window = window
         self.screen_size = screen_size
 
     @staticmethod

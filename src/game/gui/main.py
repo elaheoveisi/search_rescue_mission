@@ -16,10 +16,7 @@ class SAREnvGUI:
         self.panel_width = 400
         self.window_size = (self.env_size + self.panel_width, self.env_size)
         self.manager = pygame_gui.UIManager(self.window_size)
-
-        # Create window and UI manager using new size
-        self.window = pygame.display.set_mode(self.window_size)
-
+        self.window = env.window
         self.running = True
         self.clock = None
 
@@ -32,9 +29,6 @@ class SAREnvGUI:
     def _init_window(self):
         """Initialize the Pygame window if it isn't already initialized."""
         if self.window is None:
-            self.window = pygame.display.set_mode(
-                (self.user.env.screen_size, self.user.env.screen_size)
-            )
             pygame.display.set_caption("SAREnv")
 
         if self.clock is None:

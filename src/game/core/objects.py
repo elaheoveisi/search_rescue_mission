@@ -14,9 +14,9 @@ for new_object in new_objects:
         IDX_TO_OBJECT[len(IDX_TO_OBJECT)] = new_object
 
 
-class SARVictim(WorldObj):
-    def __init__(self):
-        super().__init__("victim", "red")
+class Victim(WorldObj):
+    def __init__(self, type="victim", color="red"):
+        super().__init__(type, color)
 
     def can_overlap(self):
         return False
@@ -28,4 +28,21 @@ class SARVictim(WorldObj):
         # Draw upright T
         fill_coords(img, point_in_rect(0.45, 0.55, 0.2, 0.8), (255, 0, 0))
         fill_coords(img, point_in_rect(0.25, 0.75, 0.2, 0.3), (255, 0, 0))
+        return img
+
+
+class FakeVictim(WorldObj):
+    def __init__(self, type="victim", color="red"):
+        super().__init__(type, color)
+
+    def can_overlap(self):
+        return False
+
+    def can_pickup(self):
+        return True
+
+    def render(self, img):
+        # Draw upright T
+        fill_coords(img, point_in_rect(0.45, 0.55, 0.2, 0.8), (255, 0, 0))
+        fill_coords(img, point_in_rect(0.40, 0.75, 0.2, 0.3), (255, 0, 0))
         return img

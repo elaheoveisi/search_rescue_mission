@@ -4,9 +4,10 @@ import random
 from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
 from minigrid.core.world_object import Ball, Door, Goal, Key, Lava, Wall
+import pygame
 
 from .core.env import SAREnv
-from .core.objects import SARVictim
+from .core.objects import Victim, FakeVictim
 
 
 class TestEnv(SAREnv):
@@ -27,7 +28,7 @@ class TestEnv(SAREnv):
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
-        self.put_obj(SARVictim(), 2, 4)
+        self.put_obj(Victim(), 2, 4)
 
         # Place the agent
         if self.agent_start_pos is not None:
@@ -71,6 +72,10 @@ class MultiRoomDifficultyEnv(SAREnv):
         grid_height = self.rooms_per_col * (self.room_size - 1) + 1
 
         grid_size = max(grid_width, grid_height)
+        
+        # TODO: Add a condition to run in windowed mode
+        self.window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+        print(self.window)
 
         super().__init__(
             grid_size=grid_size,
@@ -78,8 +83,10 @@ class MultiRoomDifficultyEnv(SAREnv):
             see_through_walls=False,
             agent_view_size=7,
             render_mode=render_mode,
+            window=self.window,
             **kwargs,
         )
+
 
     def _gen_grid(self, width, height):
         self.grid = Grid(width, height)
@@ -135,7 +142,7 @@ class MultiRoomDifficultyEnv(SAREnv):
                 if room_idx == self.room_count - 1:
                     victim_x = xL + self.room_size // 2
                     victim_y = yT + self.room_size // 2
-                    self.grid.set(victim_x, victim_y, Ball("red"))
+                    self.grid.set(victim_x, victim_y, FakeVictim(color="red"))
 
                 room_idx += 1
 
