@@ -1,4 +1,16 @@
-CELL_SIZE: 25 # Size of each cell in the grid
-ZOOM_LEVEL: 1
-WIDTH: 2500
-HEIGHT: 2500
+difficulties:
+  easy:
+    room_count: 4
+    locked_doors: 0
+    add_lava: false
+    max_steps: 80
+  medium:
+    room_count: 6
+    locked_doors: 2
+    add_lava: true
+    max_steps: 150
+  hard:
+    room_count: 16
+    locked_doors: 10
+    add_lava: true
+    max_steps: 200

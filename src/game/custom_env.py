@@ -1,13 +1,13 @@
 import math
 import random
 
+import pygame
 from minigrid.core.constants import COLOR_NAMES
 from minigrid.core.grid import Grid
-from minigrid.core.world_object import Ball, Door, Goal, Key, Lava, Wall
-import pygame
+from minigrid.core.world_object import Door, Goal, Key, Lava, Wall
 
 from .core.env import SAREnv
-from .core.objects import Victim, FakeVictim
+from .core.objects import FakeVictim, Victim
 
 
 class TestEnv(SAREnv):
@@ -41,28 +41,15 @@ class TestEnv(SAREnv):
 
 
 class MultiRoomDifficultyEnv(SAREnv):
-    def __init__(self, difficulty="easy", render_mode="human", **kwargs):
-        self.difficulty = difficulty
+    def __init__(self, config, render_mode="human", **kwargs):
         self.room_size = 5
         self.step_count = 0
 
-        if difficulty == "easy":
-            self.room_count = 4
-            self.locked_doors = 0
-            self.add_lava = False
-            self.max_steps = 80
-        elif difficulty == "medium":
-            self.room_count = 6
-            self.locked_doors = 2
-            self.add_lava = True
-            self.max_steps = 150
-        elif difficulty == "hard":
-            self.room_count = 9
-            self.locked_doors = 4
-            self.add_lava = True
-            self.max_steps = 200
-        else:
-            raise ValueError("Invalid difficulty level")
+        # Configuration
+        self.room_count = config["room_count"]
+        self.locked_doors = config["locked_doors"]
+        self.add_lava = config["add_lava"]
+        self.max_steps = config["max_steps"]
 
         # Compute grid dimensions based on room layout (rows × cols)
         self.rooms_per_row = math.ceil(math.sqrt(self.room_count))
@@ -72,7 +59,7 @@ class MultiRoomDifficultyEnv(SAREnv):
         grid_height = self.rooms_per_col * (self.room_size - 1) + 1
 
         grid_size = max(grid_width, grid_height)
-        
+
         # TODO: Add a condition to run in windowed mode
         self.window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         print(self.window)
@@ -87,6 +74,23 @@ class MultiRoomDifficultyEnv(SAREnv):
             **kwargs,
         )
 
+    def _randomly_remove_walls(self, removal_prob=0.1):
+        """
+        Randomly removes interior walls (not boundary walls).
+        removal_prob: probability of removing each wall.
+        """
+        for x in range(1, self.width - 1):
+            for y in range(1, self.height - 1):
+                obj = self.grid.get(x, y)
+
+                # Remove only plain walls (not doors, lava, keys, etc.)
+                if isinstance(obj, Door):
+                    if random.random() < removal_prob:
+                        self.grid.set(x, y, None)
+                        self.grid.set(x, y + 1, None)
+                        self.grid.set(x, y - 1, None)
+                        self.grid.set(x - 1, y, None)
+                        self.grid.set(x + 1, y, None)
 
     def _gen_grid(self, width, height):
         self.grid = Grid(width, height)
@@ -146,6 +150,8 @@ class MultiRoomDifficultyEnv(SAREnv):
 
                 room_idx += 1
 
+        self._randomly_remove_walls()
+
         self.agent_pos = (1, 1)
         self.agent_dir = 0
-        self.mission = f"Rescue the victim in a {self.difficulty} maze."
+        self.mission = "Rescue the victim in a maze."
