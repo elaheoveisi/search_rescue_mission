@@ -17,6 +17,10 @@ class SAREnvGUI:
         self.window_size = (self.env_size + self.panel_width, self.env_size)
         self.manager = pygame_gui.UIManager(self.window_size)
         self.window = env.window
+
+        if self.window is None:
+            self.window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+
         self.running = True
         self.clock = None
 

@@ -1,4 +1,4 @@
-difficulties:
+game_difficulties:
   easy:
     room_count: 4
     locked_doors: 0
