@@ -7,7 +7,8 @@ from minigrid.core.grid import Grid
 from minigrid.core.world_object import Door, Goal, Key, Lava, Wall
 
 from .core.env import SAREnv
-from .core.objects import FakeVictim, Victim
+from .core.level import SARLevelGen
+from .core.objects import FakeVictimLeft, Victim
 
 
 class TestEnv(SAREnv):
@@ -146,7 +147,7 @@ class MultiRoomDifficultyEnv(SAREnv):
                 if room_idx == self.room_count - 1:
                     victim_x = xL + self.room_size // 2
                     victim_y = yT + self.room_size // 2
-                    self.grid.set(victim_x, victim_y, FakeVictim(color="red"))
+                    self.grid.set(victim_x, victim_y, FakeVictimLeft(color="red"))
 
                 room_idx += 1
 
@@ -155,3 +156,19 @@ class MultiRoomDifficultyEnv(SAREnv):
         self.agent_pos = (1, 1)
         self.agent_dir = 0
         self.mission = "Rescue the victim in a maze."
+
+
+class CombinedInstructionEnv(SARLevelGen):
+    def __init__(self, room_size=8, num_rows=3, num_cols=3, num_dists=18, **kwargs):
+        # We add many distractors to increase the probability
+        # of ambiguous locations within the same room
+        super().__init__(
+            room_size=room_size,
+            num_rows=num_rows,
+            num_cols=num_cols,
+            num_dists=num_dists,
+            locations=False,
+            unblocking=True,
+            implicit_unlock=False,
+            **kwargs,
+        )

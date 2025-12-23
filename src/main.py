@@ -1,8 +1,9 @@
 import pygame
 import yaml
+from minigrid.manual_control import ManualControl
+
 from game.custom_env import CombinedInstructionEnv, MultiRoomDifficultyEnv, TestEnv
 from game.gui.main import SAREnvGUI
-from minigrid.manual_control import ManualControl
 from utils import skip_run
 
 # Load config
@@ -35,12 +36,15 @@ with skip_run("skip", "sar_gui") as check, check():
     gui = SAREnvGUI(env)
     gui.run()
 
-
 with skip_run("run", "sar_gui_advanced") as check, check():
     # Access the width and height of the current display
     screen_height = pygame.display.Info().current_h
     env = CombinedInstructionEnv(
-        num_rows=4, num_cols=4, screen_size=screen_height, render_mode="rgb_array"
+        num_rows=3,
+        num_cols=3,
+        screen_size=800,
+        render_mode="rgb_array",
+        agent_pov=True,
     )
     gui = SAREnvGUI(env)
     gui.run()

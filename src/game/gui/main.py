@@ -19,7 +19,7 @@ class SAREnvGUI:
         self.window = env.window
 
         if self.window is None:
-            self.window = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+            self.window = pygame.display.set_mode([800, 800])
 
         self.running = True
         self.clock = None
