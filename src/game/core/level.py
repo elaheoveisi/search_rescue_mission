@@ -1,4 +1,7 @@
 import random
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Tuple
 
 import numpy as np
 import pygame
@@ -7,7 +10,155 @@ from minigrid.envs.babyai.core.levelgen import LevelGen
 from .objects import FakeVictimLeft, FakeVictimRight, Victim
 
 
+@dataclass
+class CameraConfig:
+    """Configuration for camera behavior."""
+
+    view_tiles: Tuple[int, int] = (12, 12)
+    margin: int = 3
+    tile_size: int = 32
+
+
+class CameraStrategy(ABC):
+    """Abstract base class for different camera behaviors."""
+
+    @abstractmethod
+    def get_crop(self, grid, agent_pos, agent_dir, **kwargs) -> np.ndarray:
+        """Return a cropped view of the grid."""
+        pass
+
+
+class AgentCenteredCamera(CameraStrategy):
+    """Camera that stays centered on the agent's room."""
+
+    def __init__(self, extra_tiles=(4, 4), tile_size=32):
+        self.extra_tiles = extra_tiles
+        self.tile_size = tile_size
+
+    def get_crop(self, grid, agent_pos, agent_dir, room=None, **kwargs) -> np.ndarray:
+        """Get a crop centered on the agent's current room."""
+        agent_x, agent_y = agent_pos
+        room_w, room_h = room.size
+
+        width_tiles = room_w + self.extra_tiles[0]
+        height_tiles = room_h + self.extra_tiles[1]
+
+        top_x = agent_x - width_tiles // 2
+        top_y = agent_y - height_tiles // 2
+
+        top_x = max(0, min(top_x, grid.width - width_tiles))
+        top_y = max(0, min(top_y, grid.height - height_tiles))
+
+        bot_x = top_x + width_tiles
+        bot_y = top_y + height_tiles
+
+        px_min, px_max = top_x * self.tile_size, bot_x * self.tile_size
+        py_min, py_max = top_y * self.tile_size, bot_y * self.tile_size
+
+        full_img = grid.render(
+            self.tile_size, agent_pos, agent_dir, highlight_mask=None
+        )
+        return full_img[py_min:py_max, px_min:px_max, :]
+
+
+class EdgeFollowCamera(CameraStrategy):
+    """Camera that follows the agent with a dead-zone margin."""
+
+    def __init__(self, config: CameraConfig = None):
+        self.config = config or CameraConfig()
+        self.top_x = 0
+        self.top_y = 0
+        self.initialized = False
+
+    def _initialize(self, agent_x, agent_y):
+        """Initialize camera position."""
+        view_w, view_h = self.config.view_tiles
+        self.top_x = max(0, agent_x - view_w // 2)
+        self.top_y = max(0, agent_y - view_h // 2)
+        self.initialized = True
+
+    def _update_position(self, agent_x, agent_y, grid_width, grid_height):
+        """Update camera position based on agent movement."""
+        if not self.initialized:
+            self._initialize(agent_x, agent_y)
+
+        view_w, view_h = self.config.view_tiles
+        margin = self.config.margin
+
+        # Calculate dead-zone boundaries
+        left = self.top_x + margin
+        right = self.top_x + view_w - margin - 1
+        top = self.top_y + margin
+        bottom = self.top_y + view_h - margin - 1
+
+        # Move camera if agent exits dead-zone
+        if agent_x < left:
+            self.top_x -= left - agent_x
+        elif agent_x > right:
+            self.top_x += agent_x - right
+
+        if agent_y < top:
+            self.top_y -= top - agent_y
+        elif agent_y > bottom:
+            self.top_y += agent_y - bottom
+
+        # Clamp to grid bounds
+        self.top_x = max(0, min(self.top_x, grid_width - view_w))
+        self.top_y = max(0, min(self.top_y, grid_height - view_h))
+
+    def get_crop(
+        self, grid, agent_pos, agent_dir, grid_width=None, grid_height=None, **kwargs
+    ) -> np.ndarray:
+        """Get a crop that follows the agent with edge-following behavior."""
+        agent_x, agent_y = agent_pos
+        self._update_position(agent_x, agent_y, grid_width, grid_height)
+
+        view_w, view_h = self.config.view_tiles
+        tile_size = self.config.tile_size
+
+        # Render full grid
+        full_img = grid.render(tile_size, agent_pos, agent_dir, highlight_mask=None)
+
+        # Calculate pixel boundaries
+        px_min = self.top_x * tile_size
+        px_max = (self.top_x + view_w) * tile_size
+        py_min = self.top_y * tile_size
+        py_max = (self.top_y + view_h) * tile_size
+
+        return full_img[py_min:py_max, px_min:px_max, :]
+
+    def reset(self):
+        """Reset camera state."""
+        self.initialized = False
+
+
+class VictimPlacer:
+    """Handles placement of victims and fake victims."""
+
+    def __init__(self, num_fake_victims=3):
+        self.num_fake_victims = num_fake_victims
+
+    def place_fake_victims(self, level_gen, i, j):
+        """Place fake victims in a room."""
+        for _ in range(self.num_fake_victims):
+            obj = (
+                FakeVictimLeft(color="red")
+                if random.random() <= 0.5
+                else FakeVictimRight(color="red")
+            )
+            level_gen.place_in_room(i, j, obj)
+
+    def place_all(self, level_gen, num_rows, num_cols):
+        """Place victims and fake victims in all rooms."""
+        for i in range(num_rows):
+            for j in range(num_cols):
+                level_gen.place_in_room(i, j, Victim(color="red"))
+                self.place_fake_victims(level_gen, i, j)
+
+
 class SARLevelGen(LevelGen):
+    """Search and Rescue level generator with pluggable camera system."""
+
     def __init__(
         self,
         num_fake_victims=3,
@@ -22,9 +173,9 @@ class SARLevelGen(LevelGen):
         action_kinds=["goto", "pickup", "open", "putnext"],
         instr_kinds=["action", "and", "seq"],
         window=None,
+        camera_strategy=None,
         **kwargs,
     ):
-        self.num_fake_victims = num_fake_victims
         if window is None:
             self.window = pygame.display.set_mode([800, 800])
 
@@ -42,109 +193,51 @@ class SARLevelGen(LevelGen):
             **kwargs,
         )
 
-    def place_fake_victims(self, i, j):
-        # Place fake victimes
-        for k in range(self.num_fake_victims):
-            if random.random() <= 0.5:
-                obj = FakeVictimLeft(color="red")
-            else:
-                obj = FakeVictimRight(color="red")
-            self.place_in_room(i, j, obj)
-
-    def place_victims_and_distractors(self):
-        # Get room dimensions
-        rooms = [(i, j) for i in range(self.num_rows) for j in range(self.num_cols)]
-
-        # Ensure at least one victim in each room
-        for i, j in rooms:
-            self.place_in_room(i, j, Victim(color="red"))  # Place victim in the room
-            self.place_fake_victims(i, j)
+        # Use strategy pattern for camera
+        self.camera = camera_strategy or EdgeFollowCamera()
+        self.victim_placer = VictimPlacer(num_fake_victims)
 
     def gen_mission(self):
-        # Optional: blocked areas instead of locked rooms
+        """Generate the mission layout and instructions."""
         if self._rand_bool():
-            self.add_locked_room()  # interpret as rubble-blocked area
+            self.add_locked_room()
 
         self.connect_all()
+        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
 
-        self.place_victims_and_distractors()
-
+        # Place agent outside locked room
         while True:
             self.place_agent()
             start_room = self.room_from_pos(*self.agent_pos)
-            # Ensure that we are not placing the agent in the locked room
-            if start_room is self.locked_room:
-                continue
-            break
+            if start_room is not self.locked_room:
+                break
 
-        # If no unblocking required, make sure all objects are
-        # reachable without unblocking
         if not self.unblocking:
             self.check_objs_reachable()
 
-        # Generate random instructions
         self.instrs = self.rand_instr(
             action_kinds=self.action_kinds,
             instr_kinds=self.instr_kinds,
         )
 
-    def get_agent_centered_crop(self, extra_tiles=(4, 4), tile_size=None):
-        """
-        Returns a pixel crop of the grid centered on the agent.
-
-        Args:
-            extra_tiles: (extra_width, extra_height) number of tiles to add around the agent's room
-            tile_size: pixels per tile
-        Returns:
-            cropped_img: np.ndarray RGB image
-        """
-        tile_size = tile_size or 32
-        agent_x, agent_y = self.agent_pos
-
-        # Get agent's room
-        room = self.room_from_pos(agent_x, agent_y)
-        room_x, room_y = room.top
-        room_w, room_h = room.size
-
-        # Define the bounding box in tiles
-        width_tiles = room_w + extra_tiles[0]
-        height_tiles = room_h + extra_tiles[1]
-
-        # Center bounding box on agent
-        top_x = agent_x - width_tiles // 2
-        top_y = agent_y - height_tiles // 2
-
-        # Clip to grid bounds
-        top_x = max(0, min(top_x, self.width - width_tiles))
-        top_y = max(0, min(top_y, self.height - height_tiles))
-
-        # Bottom-right corner
-        bot_x = top_x + width_tiles
-        bot_y = top_y + height_tiles
-
-        # Convert to pixels
-        px_min = top_x * tile_size
-        px_max = bot_x * tile_size
-        py_min = top_y * tile_size
-        py_max = bot_y * tile_size
-
-        # Render full grid
-        full_img = self.grid.render(
-            tile_size,
-            self.agent_pos,
-            self.agent_dir,
-            highlight_mask=None,
+    def get_camera_view(self, **kwargs) -> np.ndarray:
+        """Get current camera view using the configured strategy."""
+        room = self.room_from_pos(*self.agent_pos)
+        return self.camera.get_crop(
+            grid=self.grid,
+            agent_pos=self.agent_pos,
+            agent_dir=self.agent_dir,
+            room=room,
+            grid_width=self.width,
+            grid_height=self.height,
+            **kwargs,
         )
 
-        # Crop pixels
-        cropped_img = full_img[py_min:py_max, px_min:px_max, :]
-
-        return cropped_img
-
     def render(self):
-        img = self.get_agent_centered_crop()
+        """Render the environment."""
+        img = self.get_camera_view()
+
         if self.render_mode == "human":
-            # Pygame expects (width, height, channels)
             img = np.transpose(img, axes=(1, 0, 2))
 
             if self.window is None:
@@ -165,3 +258,7 @@ class SARLevelGen(LevelGen):
 
         elif self.render_mode == "rgb_array":
             return img
+
+    def switch_camera(self, camera_strategy: CameraStrategy):
+        """Switch to a different camera strategy at runtime."""
+        self.camera = camera_strategy
