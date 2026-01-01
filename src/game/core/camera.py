@@ -23,6 +23,17 @@ class CameraStrategy(ABC):
         pass
 
 
+class FullviewCamera(CameraStrategy):
+    def __init__(self, tile_size=32):
+        self.tile_size = tile_size
+
+    def get_crop(self, grid, agent_pos, agent_dir, **kwargs):
+        full_img = grid.render(
+            self.tile_size, agent_pos, agent_dir, highlight_mask=None
+        )
+        return full_img
+
+
 class AgentCenteredCamera(CameraStrategy):
     """Camera that stays centered on the agent's room."""
 

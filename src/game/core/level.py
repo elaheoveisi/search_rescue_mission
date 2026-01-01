@@ -80,7 +80,7 @@ class SARLevelGen(LevelGen):
 
     def gen_mission(self):
         """Generate the mission layout and instructions."""
-        if self._rand_bool():
+        if self._rand_float(0, 1) <= 0:
             self.add_locked_room()
 
         self.connect_all()
@@ -113,32 +113,6 @@ class SARLevelGen(LevelGen):
             grid_height=self.height,
             **kwargs,
         )
-
-    def _extended_pickup(self):
-        fwd_pos = self.front_pos
-        obj = self.grid.get(*fwd_pos)
-
-        # Fallback to normal pickup if not a victim
-        if not isinstance(obj, (Victim, FakeVictimLeft, FakeVictimRight)):
-            return super().step(self.actions.pickup)
-
-        # Remove object from grid
-        self.grid.set(*fwd_pos, None)
-
-        # Assign reward
-        if isinstance(obj, Victim):
-            reward = 1.0
-            self.saved_victims += 1
-        else:  # Fake victim
-            reward = -0.5
-
-        # Generate observation
-        obs = self.gen_obs()
-
-        # Check if all victims are saved
-        terminated = self.saved_victims == self.num_rows * self.num_cols
-
-        return obs, reward, terminated, False, {}
 
     def step(self, action):
         if action == self.actions.pickup:
