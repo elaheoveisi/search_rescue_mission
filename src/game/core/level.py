@@ -114,11 +114,14 @@ class SARLevelGen(LevelGen):
             **kwargs,
         )
 
+    def _step(self, action):
+        return super().step(action)
+
     def step(self, action):
         if action == self.actions.pickup:
-            return self.resuce_action.execute()
+            return self.resuce_action.execute(action)
         else:
-            return super().step(action)
+            return self._step(action)
 
     def render(self):
         """Render the environment."""
