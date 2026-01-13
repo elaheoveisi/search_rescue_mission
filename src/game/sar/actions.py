@@ -1,4 +1,4 @@
-from .objects import FakeVictimLeft, FakeVictimRight, VictimLeft, VictimRight, VictimUp
+from .objects import FAKE_VICTIMS, REAL_VICTIMS
 
 
 class BaseAction:
@@ -19,11 +19,11 @@ class RescueAction(BaseAction):
         obj = self.env.grid.get(*fwd_pos)
         reward = 0
 
-        if isinstance(obj, (VictimUp, VictimLeft, VictimRight)):
+        if isinstance(obj, REAL_VICTIMS):
             self.env.grid.set(*fwd_pos, None)
             self.env.saved_victims += 1
             reward = 1.0
-        elif isinstance(obj, (FakeVictimLeft, FakeVictimRight)):
+        elif isinstance(obj, FAKE_VICTIMS):
             self.env.grid.set(*fwd_pos, None)
             reward = -0.5
         else:
@@ -31,5 +31,6 @@ class RescueAction(BaseAction):
             return self.env._step(self.env.actions.pickup)
 
         obs = self.env.gen_obs()
-        terminated = self.env.saved_victims == self.env.num_rows * self.env.num_cols
+        # Don't terminate here - let the instruction verification system handle it
+        terminated = False
         return obs, reward, terminated, False, {}

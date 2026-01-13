@@ -2,7 +2,6 @@ import numpy as np
 import pygame
 from minigrid.envs.babyai.core.levelgen import LevelGen
 
-from .actions import RescueAction
 from .camera import CameraStrategy, EdgeFollowCamera
 
 
@@ -46,9 +45,6 @@ class SARLevelGen(LevelGen):
         self.camera = camera_strategy or EdgeFollowCamera()
         self.saved_victims = 0
 
-        # Custom actions
-        self.resuce_action = RescueAction(self)
-
     def gen_mission(self):
         """Generate the mission layout and instructions."""
         if self._rand_float(0, 1) <= 0:
@@ -83,15 +79,6 @@ class SARLevelGen(LevelGen):
             grid_height=self.height,
             **kwargs,
         )
-
-    def _step(self, action):
-        return super().step(action)
-
-    def step(self, action):
-        if action == self.actions.pickup:
-            return self.resuce_action.execute(action)
-        else:
-            return self._step(action)
 
     def render(self):
         """Render the environment."""

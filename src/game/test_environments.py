@@ -1,3 +1,8 @@
+"""
+Test environment classes for development and debugging.
+These environments are used for testing specific features and scenarios.
+"""
+
 import math
 import random
 
@@ -7,12 +12,12 @@ from minigrid.core.grid import Grid
 from minigrid.core.world_object import Door, Goal, Key, Lava, Wall
 
 from .core.env import SAREnv
-from .core.level import SARLevelGen
-from .core.objects import FakeVictimLeft, VictimUp
-from .utils import VictimPlacer
+from .sar.objects import FakeVictimLeft, VictimUp
 
 
 class TestEnv(SAREnv):
+    """Simple test environment with basic layout for debugging."""
+
     def _gen_grid(self, width, height):
         # Create an empty grid
         self.grid = Grid(width, height)
@@ -43,6 +48,8 @@ class TestEnv(SAREnv):
 
 
 class MultiRoomDifficultyEnv(SAREnv):
+    """Multi-room environment with configurable difficulty settings."""
+
     def __init__(self, config, render_mode="human", **kwargs):
         self.room_size = 5
         self.step_count = 0
@@ -93,6 +100,12 @@ class MultiRoomDifficultyEnv(SAREnv):
                         self.grid.set(x, y - 1, None)
                         self.grid.set(x - 1, y, None)
                         self.grid.set(x + 1, y, None)
+
+    def step(self, action):
+        if action == self.actions.pickup:
+            return self.resuce_action.execute(action)
+        else:
+            return self._step(action)
 
     def _gen_grid(self, width, height):
         self.grid = Grid(width, height)
@@ -157,91 +170,3 @@ class MultiRoomDifficultyEnv(SAREnv):
         self.agent_pos = (1, 1)
         self.agent_dir = 0
         self.mission = "Rescue the victim in a maze."
-
-
-class CombinedInstructionEnv(SARLevelGen):
-    def __init__(self, room_size=8, num_rows=3, num_cols=3, num_dists=18, **kwargs):
-        # We add many distractors to increase the probability
-        # of ambiguous locations within the same room
-        super().__init__(
-            room_size=room_size,
-            num_rows=num_rows,
-            num_cols=num_cols,
-            num_dists=num_dists,
-            locations=False,
-            unblocking=True,
-            implicit_unlock=False,
-            **kwargs,
-        )
-        self.victim_placer = VictimPlacer(num_fake_victims=0)
-
-    def add_locked_rooms(self, n_locked):
-        added = 0
-
-        while added < n_locked:
-            # Pick a random room
-            i, j = self._rand_int(0, self.num_cols), self._rand_int(0, self.num_rows)
-            locked_room = self.get_room(i, j)
-
-            # Skip if room is already locked
-            if locked_room.locked:
-                continue
-
-            # Find all door indices that are still empty
-            empty_doors = [idx for idx, d in enumerate(locked_room.doors) if d is None]
-            if not empty_doors:
-                continue  # no free door, pick another room
-
-            # Pick a random empty door
-            door_idx = random.choice(empty_doors)
-
-            # Skip if door leads outside
-            if locked_room.neighbors[door_idx] is None:
-                continue
-
-            # Add locked door
-            door, _ = self.add_door(i, j, door_idx, locked=True)
-            locked_room.locked = True
-
-            # Place key in a different room
-            while True:
-                ki, kj = (
-                    self._rand_int(0, self.num_cols),
-                    self._rand_int(0, self.num_rows),
-                )
-                key_room = self.get_room(ki, kj)
-                if key_room is locked_room:
-                    continue
-                if getattr(key_room, "locked", False):
-                    continue  # avoid placing key in another locked room
-                self.add_object(ki, kj, "key", door.color)
-                break
-
-            added += 1
-
-    def gen_mission(self):
-        """Generate the mission layout and instructions."""
-
-        # Add locked rooms
-        n_locked = int(self.num_cols * self.num_rows * 0.5)  # or pass as argument
-        self.add_locked_rooms(n_locked)
-
-        self.connect_all()
-
-        # Place agent outside locked room
-        while True:
-            self.place_agent()
-            start_room = self.room_from_pos(*self.agent_pos)
-            if not start_room.locked:
-                break
-
-        # Add victims
-        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
-
-        if not self.unblocking:
-            self.check_objs_reachable()
-
-        self.instrs = self.rand_instr(
-            action_kinds=self.action_kinds,
-            instr_kinds=self.instr_kinds,
-        )
