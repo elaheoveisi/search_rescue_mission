@@ -85,6 +85,10 @@ class FakeVictimLeft(VictimBase):
     def __init__(self, type="fake_victim_left", color="red"):
         super().__init__(type, color)
 
+    def can_overlap(self):
+        """Fake victims can be walked over - they're just visual distractors."""
+        return True
+
 
 class FakeVictimRight(VictimBase):
     """Fake victim (penalty when picked up) - right T shape."""
@@ -96,6 +100,10 @@ class FakeVictimRight(VictimBase):
 
     def __init__(self, type="fake_victim_right", color="red"):
         super().__init__(type, color)
+
+    def can_overlap(self):
+        """Fake victims can be walked over - they're just visual distractors."""
+        return True
 
 
 # Constants for victim type checking (reduces duplication)

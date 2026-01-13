@@ -191,11 +191,15 @@ class CombinedInstructionEnv(SARLevelGen):
     def gen_mission(self):
         """Generate the mission layout and instructions."""
 
-        # Add locked rooms
-        n_locked = int(self.num_cols * self.num_rows * 0.5)  # or pass as argument
+        # Add locked rooms (20% of rooms - balanced between challenge and generation speed)
+        n_locked = max(1, int(self.num_cols * self.num_rows * 0.25))
         self.add_locked_rooms(n_locked)
 
         self.connect_all()
+
+        # Add lava obstacles (before victims to avoid blocking them)
+        if self.add_lava:
+            self.lava_placer.place_all(self, self.num_rows, self.num_cols)
 
         # Place agent outside locked room
         while True:
@@ -203,10 +207,6 @@ class CombinedInstructionEnv(SARLevelGen):
             start_room = self.room_from_pos(*self.agent_pos)
             if not start_room.locked:
                 break
-
-        # Add lava obstacles (before victims to avoid blocking them)
-        if self.add_lava:
-            self.lava_placer.place_all(self, self.num_rows, self.num_cols)
 
         # Add victims
         self.victim_placer.place_all(self, self.num_rows, self.num_cols)

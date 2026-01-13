@@ -50,7 +50,7 @@ with skip_run("run", "sar_gui_advanced") as check, check():
         render_mode="rgb_array",
         agent_pov=True,
         add_lava=True,
-        lava_per_room=2,
+        lava_per_room=1,
         camera_strategy=FullviewCamera(),
         victim_placer=victim_placer,
     )
