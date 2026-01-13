@@ -2,6 +2,7 @@ import pygame
 import yaml
 from minigrid.manual_control import ManualControl
 
+from game.core.camera import FullviewCamera
 from game.custom_env import CombinedInstructionEnv, MultiRoomDifficultyEnv, TestEnv
 from game.gui.main import SAREnvGUI
 from utils import skip_run
@@ -45,7 +46,7 @@ with skip_run("run", "sar_gui_advanced") as check, check():
         screen_size=800,
         render_mode="rgb_array",
         agent_pov=True,
-        # camera_strategy=FullviewCamera(),
+        camera_strategy=FullviewCamera(),
     )
     gui = SAREnvGUI(env)
     gui.run()

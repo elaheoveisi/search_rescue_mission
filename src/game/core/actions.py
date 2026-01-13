@@ -1,4 +1,4 @@
-from .objects import FakeVictimLeft, FakeVictimRight, Victim
+from .objects import FakeVictimLeft, FakeVictimRight, VictimLeft, VictimRight, VictimUp
 
 
 class BaseAction:
@@ -19,7 +19,7 @@ class RescueAction(BaseAction):
         obj = self.env.grid.get(*fwd_pos)
         reward = 0
 
-        if isinstance(obj, Victim):
+        if isinstance(obj, (VictimUp, VictimLeft, VictimRight)):
             self.env.grid.set(*fwd_pos, None)
             self.env.saved_victims += 1
             reward = 1.0

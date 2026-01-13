@@ -8,7 +8,8 @@ from minigrid.core.world_object import Door, Goal, Key, Lava, Wall
 
 from .core.env import SAREnv
 from .core.level import SARLevelGen
-from .core.objects import FakeVictimLeft, Victim
+from .core.objects import FakeVictimLeft, VictimUp
+from .utils import VictimPlacer
 
 
 class TestEnv(SAREnv):
@@ -29,7 +30,7 @@ class TestEnv(SAREnv):
 
         # Place a goal square in the bottom-right corner
         self.put_obj(Goal(), width - 2, height - 2)
-        self.put_obj(Victim(), 2, 4)
+        self.put_obj(VictimUp(), 2, 4)
 
         # Place the agent
         if self.agent_start_pos is not None:
@@ -172,21 +173,70 @@ class CombinedInstructionEnv(SARLevelGen):
             implicit_unlock=False,
             **kwargs,
         )
+        self.victim_placer = VictimPlacer(num_fake_victims=0)
+
+    def add_locked_rooms(self, n_locked):
+        added = 0
+
+        while added < n_locked:
+            # Pick a random room
+            i, j = self._rand_int(0, self.num_cols), self._rand_int(0, self.num_rows)
+            locked_room = self.get_room(i, j)
+
+            # Skip if room is already locked
+            if locked_room.locked:
+                continue
+
+            # Find all door indices that are still empty
+            empty_doors = [idx for idx, d in enumerate(locked_room.doors) if d is None]
+            if not empty_doors:
+                continue  # no free door, pick another room
+
+            # Pick a random empty door
+            door_idx = random.choice(empty_doors)
+
+            # Skip if door leads outside
+            if locked_room.neighbors[door_idx] is None:
+                continue
+
+            # Add locked door
+            door, _ = self.add_door(i, j, door_idx, locked=True)
+            locked_room.locked = True
+
+            # Place key in a different room
+            while True:
+                ki, kj = (
+                    self._rand_int(0, self.num_cols),
+                    self._rand_int(0, self.num_rows),
+                )
+                key_room = self.get_room(ki, kj)
+                if key_room is locked_room:
+                    continue
+                if getattr(key_room, "locked", False):
+                    continue  # avoid placing key in another locked room
+                self.add_object(ki, kj, "key", door.color)
+                break
+
+            added += 1
 
     def gen_mission(self):
         """Generate the mission layout and instructions."""
-        if self._rand_float(0, 1) <= 0:
-            self.add_locked_room()
+
+        # Add locked rooms
+        n_locked = int(self.num_cols * self.num_rows * 0.5)  # or pass as argument
+        self.add_locked_rooms(n_locked)
 
         self.connect_all()
-        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
 
         # Place agent outside locked room
         while True:
             self.place_agent()
             start_room = self.room_from_pos(*self.agent_pos)
-            if start_room is not self.locked_room:
+            if not start_room.locked:
                 break
+
+        # Add victims
+        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
 
         if not self.unblocking:
             self.check_objs_reachable()
