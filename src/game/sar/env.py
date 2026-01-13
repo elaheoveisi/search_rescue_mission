@@ -7,7 +7,7 @@ from .objects import REAL_VICTIMS
 from .utils import LavaPlacer
 
 
-class CombinedInstructionEnv(SARLevelGen):
+class PickupVictimEnv(SARLevelGen):
     def __init__(
         self,
         room_size=8,
@@ -18,6 +18,7 @@ class CombinedInstructionEnv(SARLevelGen):
         add_lava=True,
         lava_per_room=0,
         lava_probability=0.5,
+        locked_room_prob=0.5,
         victim_placer=None,
         **kwargs,
     ):
@@ -34,6 +35,7 @@ class CombinedInstructionEnv(SARLevelGen):
             **kwargs,
         )
         self.victim_placer = victim_placer
+        self.locked_room_prob = locked_room_prob
 
         # Lava configuration
         self.add_lava = add_lava
@@ -192,7 +194,7 @@ class CombinedInstructionEnv(SARLevelGen):
         """Generate the mission layout and instructions."""
 
         # Add locked rooms (20% of rooms - balanced between challenge and generation speed)
-        n_locked = max(1, int(self.num_cols * self.num_rows * 0.25))
+        n_locked = max(1, int(self.num_cols * self.num_rows * self.locked_room_prob))
         self.add_locked_rooms(n_locked)
 
         self.connect_all()
@@ -208,12 +210,12 @@ class CombinedInstructionEnv(SARLevelGen):
             if not start_room.locked:
                 break
 
-        # Add victims
-        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
-
         # Check that all objects (including victims) are reachable from agent start position
         if not self.unblocking:
             self.check_objs_reachable()
+
+        # Add victims after checking reachability
+        self.victim_placer.place_all(self, self.num_rows, self.num_cols)
 
         victims = self.get_all_victims()
 

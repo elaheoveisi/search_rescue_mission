@@ -2,7 +2,7 @@ from minigrid.envs.babyai.core.levelgen import LevelGen
 from minigrid.manual_control import ManualControl
 
 
-class CombinedInstructionEnv(LevelGen):
+class PickupVictimEnv(LevelGen):
     def __init__(self, room_size=8, num_rows=3, num_cols=3, num_dists=18, **kwargs):
         # We add many distractors to increase the probability
         # of ambiguous locations within the same room
@@ -19,7 +19,7 @@ class CombinedInstructionEnv(LevelGen):
         )
 
 
-env = CombinedInstructionEnv(
+env = PickupVictimEnv(
     num_rows=4, num_cols=4, instr_kinds=["seq", "seq"], render_mode="human"
 )
 print(env.get_instructions())

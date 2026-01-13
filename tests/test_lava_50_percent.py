@@ -9,7 +9,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.game.sar.env import CombinedInstructionEnv
+from src.game.sar.env import PickupVictimEnv
 
 
 def count_lava_tiles(env):
@@ -18,7 +18,7 @@ def count_lava_tiles(env):
     for x in range(env.width):
         for y in range(env.height):
             obj = env.grid.get(x, y)
-            if obj and obj.type == 'lava':
+            if obj and obj.type == "lava":
                 lava_count += 1
     return lava_count
 
@@ -30,7 +30,7 @@ def count_rooms_with_lava(env):
     for x in range(env.width):
         for y in range(env.height):
             obj = env.grid.get(x, y)
-            if obj and obj.type == 'lava':
+            if obj and obj.type == "lava":
                 # Find which room this lava is in
                 room = env.room_from_pos(x, y)
                 if room:
@@ -50,13 +50,13 @@ def main():
     total_rooms = num_rows * num_cols
     num_tests = 10
 
-    env = CombinedInstructionEnv(
+    env = PickupVictimEnv(
         room_size=6,
         num_rows=num_rows,
         num_cols=num_cols,
         add_lava=True,  # Default is now True
         lava_probability=0.5,  # Default is now 0.5
-        render_mode=None
+        render_mode=None,
     )
 
     total_rooms_with_lava = 0
@@ -76,7 +76,9 @@ def main():
         total_rooms_with_lava += rooms_with_lava
 
         percentage = (rooms_with_lava / total_rooms) * 100
-        print(f"Test {i+1:2d}: {rooms_with_lava}/{total_rooms} rooms with lava ({percentage:.0f}%) - {lava_tiles} tiles total")
+        print(
+            f"Test {i + 1:2d}: {rooms_with_lava}/{total_rooms} rooms with lava ({percentage:.0f}%) - {lava_tiles} tiles total"
+        )
 
     avg_rooms_with_lava = total_rooms_with_lava / num_tests
     avg_lava_tiles = total_lava_tiles / num_tests
@@ -85,7 +87,9 @@ def main():
     print("\n" + "=" * 70)
     print("Results")
     print("=" * 70)
-    print(f"Average rooms with lava: {avg_rooms_with_lava:.1f}/{total_rooms} ({avg_percentage:.1f}%)")
+    print(
+        f"Average rooms with lava: {avg_rooms_with_lava:.1f}/{total_rooms} ({avg_percentage:.1f}%)"
+    )
     print(f"Average lava tiles: {avg_lava_tiles:.1f}")
     print(f"Expected percentage: 50%")
     print(f"Actual percentage: {avg_percentage:.1f}%")
@@ -95,7 +99,9 @@ def main():
         print("\n✅ Test PASSED: Lava placement is within expected range!")
         return 0
     else:
-        print(f"\n❌ Test FAILED: Lava percentage {avg_percentage:.1f}% is outside expected range (30-70%)")
+        print(
+            f"\n❌ Test FAILED: Lava percentage {avg_percentage:.1f}% is outside expected range (30-70%)"
+        )
         return 1
 
 

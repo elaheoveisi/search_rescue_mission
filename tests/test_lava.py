@@ -9,7 +9,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.game.sar.env import CombinedInstructionEnv
+from src.game.sar.env import PickupVictimEnv
 
 
 def count_lava_tiles(env):
@@ -18,7 +18,7 @@ def count_lava_tiles(env):
     for x in range(env.width):
         for y in range(env.height):
             obj = env.grid.get(x, y)
-            if obj and obj.type == 'lava':
+            if obj and obj.type == "lava":
                 lava_count += 1
     return lava_count
 
@@ -28,12 +28,8 @@ def test_no_lava():
     print("Test 1: Environment WITHOUT lava")
     print("=" * 70)
 
-    env = CombinedInstructionEnv(
-        room_size=6,
-        num_rows=2,
-        num_cols=2,
-        add_lava=False,
-        render_mode=None
+    env = PickupVictimEnv(
+        room_size=6, num_rows=2, num_cols=2, add_lava=False, render_mode=None
     )
 
     obs, info = env.reset()
@@ -51,13 +47,13 @@ def test_lava_with_probability():
     print("Test 2: Environment WITH lava (probability-based)")
     print("=" * 70)
 
-    env = CombinedInstructionEnv(
+    env = PickupVictimEnv(
         room_size=6,
         num_rows=3,
         num_cols=3,
         add_lava=True,
         lava_probability=0.5,  # 50% chance per room
-        render_mode=None
+        render_mode=None,
     )
 
     total_lava = 0
@@ -67,7 +63,7 @@ def test_lava_with_probability():
         obs, info = env.reset()
         lava_count = count_lava_tiles(env)
         total_lava += lava_count
-        print(f"  Reset {i+1}: {lava_count} lava tiles")
+        print(f"  Reset {i + 1}: {lava_count} lava tiles")
 
     avg_lava = total_lava / num_resets
     print(f"  Average lava per environment: {avg_lava:.1f}")
@@ -85,13 +81,13 @@ def test_lava_fixed_per_room():
     num_rows = 2
     num_cols = 2
 
-    env = CombinedInstructionEnv(
+    env = PickupVictimEnv(
         room_size=6,
         num_rows=num_rows,
         num_cols=num_cols,
         add_lava=True,
         lava_per_room=lava_per_room,
-        render_mode=None
+        render_mode=None,
     )
 
     obs, info = env.reset()
@@ -111,14 +107,14 @@ def test_lava_with_reachability():
     print("Test 4: Lava with reachability enforcement")
     print("=" * 70)
 
-    env = CombinedInstructionEnv(
+    env = PickupVictimEnv(
         room_size=6,
         num_rows=2,
         num_cols=2,
         add_lava=True,
         lava_probability=0.6,
         unblocking=False,  # Enforce reachability
-        render_mode=None
+        render_mode=None,
     )
 
     successes = 0
@@ -129,12 +125,16 @@ def test_lava_with_reachability():
             obs, info = env.reset()
             lava_count = count_lava_tiles(env)
             victims = env.get_all_victims()
-            print(f"  Test {i+1}: {lava_count} lava tiles, {len(victims)} victims (all reachable)")
+            print(
+                f"  Test {i + 1}: {lava_count} lava tiles, {len(victims)} victims (all reachable)"
+            )
             successes += 1
         except Exception as e:
-            print(f"  Test {i+1}: Failed - {e}")
+            print(f"  Test {i + 1}: Failed - {e}")
 
-    print(f"  ✓ {successes}/{num_tests} environments generated with guaranteed reachability\n")
+    print(
+        f"  ✓ {successes}/{num_tests} environments generated with guaranteed reachability\n"
+    )
 
     return successes > 0
 

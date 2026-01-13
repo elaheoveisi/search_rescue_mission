@@ -2,35 +2,29 @@ import random
 
 from minigrid.core.world_object import Lava
 
-from .objects import (
-    FakeVictimLeft,
-    FakeVictimRight,
-    VictimLeft,
-    VictimRight,
-    VictimUp,
-)
+from .objects import FakeVictim, FakeVictims, RealVictims, Victim
 
 
 class VictimPlacer:
     """Handles placement of victims and fake victims."""
 
+    DIRECTIONS = ["up", "down", "left", "right"]
+    SHIFTS = ["left", "right"]
+
     def __init__(self, num_fake_victims=3, important_victim="up"):
         self.num_fake_victims = num_fake_victims
+        # Can use either the factory or direct instantiation
         self.victims = {
-            "up": VictimUp(color="red"),
-            "left": VictimLeft(color="red"),
-            "right": VictimRight(color="red"),
+            direction: Victim(direction, color="red") for direction in self.DIRECTIONS
         }
         self.important_victim = important_victim
 
     def place_fake_victims(self, level_gen, i, j):
-        """Place fake victims in a room."""
+        """Place fake victims in a room using factory pattern."""
         for _ in range(self.num_fake_victims):
-            obj = (
-                FakeVictimLeft(color="red")
-                if random.random() <= 0.5
-                else FakeVictimRight(color="red")
-            )
+            shift = random.choice(self.SHIFTS)
+            direction = random.choice(self.DIRECTIONS)
+            obj = FakeVictim(shift, direction, color="red")
             level_gen.place_in_room(i, j, obj)
 
     def place_all(self, level_gen, num_rows, num_cols):

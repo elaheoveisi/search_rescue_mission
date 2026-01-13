@@ -3,7 +3,7 @@
 Test reachability with unblocking=False to ensure all victims are directly reachable.
 """
 
-from src.game.sar.env import CombinedInstructionEnv
+from src.game.sar.env import PickupVictimEnv
 
 
 def test_strict_reachability(num_tests=5):
@@ -14,7 +14,7 @@ def test_strict_reachability(num_tests=5):
     )
 
     # Create environment with strict reachability enforcement
-    env = CombinedInstructionEnv(
+    env = PickupVictimEnv(
         room_size=6,
         num_rows=2,
         num_cols=2,
