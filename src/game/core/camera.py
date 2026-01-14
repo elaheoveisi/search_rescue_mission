@@ -11,7 +11,7 @@ class CameraConfig:
 
     view_tiles: Tuple[int, int] = (12, 12)
     margin: int = 3
-    tile_size: int = 32
+    tile_size: int = 64
 
 
 class CameraStrategy(ABC):

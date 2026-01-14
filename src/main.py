@@ -27,8 +27,9 @@ with skip_run("run", "sar_gui_advanced") as check, check():
         add_lava=True,
         lava_per_room=2,
         locked_room_prob=0.5,
-        camera_strategy=FullviewCamera(),
+        # camera_strategy=FullviewCamera(),
+        tile_size=64,
         victim_placer=victim_placer,
     )
-    gui = SAREnvGUI(env)
+    gui = SAREnvGUI(env, fullscreen=False)
     gui.run()
