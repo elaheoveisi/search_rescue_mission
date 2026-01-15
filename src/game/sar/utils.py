@@ -2,7 +2,7 @@ import random
 
 from minigrid.core.world_object import Lava
 
-from .objects import FakeVictim, FakeVictims, RealVictims, Victim
+from .objects import FakeVictim, Victim
 
 
 class VictimPlacer:
@@ -11,8 +11,17 @@ class VictimPlacer:
     DIRECTIONS = ["up", "down", "left", "right"]
     SHIFTS = ["left", "right"]
 
-    def __init__(self, num_fake_victims=3, important_victim="up"):
+    def __init__(self, num_fake_victims=3, num_real_victims=1, important_victim="up"):
+        """
+        Initialize the victim placer.
+
+        Args:
+            num_fake_victims: Number of fake victims to place per room
+            num_real_victims: Number of real victims to place per room
+            important_victim: Direction of the important victim (placed in locked rooms)
+        """
         self.num_fake_victims = num_fake_victims
+        self.num_real_victims = num_real_victims
         # Can use either the factory or direct instantiation
         self.victims = {
             direction: Victim(direction, color="red") for direction in self.DIRECTIONS
@@ -32,15 +41,22 @@ class VictimPlacer:
         for i in range(num_rows):
             for j in range(num_cols):
                 room = level_gen.get_room(i, j)
-                if room.locked:
-                    victim_to_place = self.victims[self.important_victim]
-                else:
-                    non_important_victims = [
-                        v for k, v in self.victims.items() if k != self.important_victim
-                    ]
-                    victim_to_place = random.choice(non_important_victims)
 
-                level_gen.place_in_room(i, j, victim_to_place)
+                # Place real victims (num_real_victims per room)
+                for _ in range(self.num_real_victims):
+                    if room.locked:
+                        # Always use important victim in locked rooms
+                        victim_to_place = self.victims[self.important_victim]
+                    else:
+                        # Randomly select from non-important victims in unlocked rooms
+                        non_important_victims = [
+                            v for k, v in self.victims.items() if k != self.important_victim
+                        ]
+                        victim_to_place = random.choice(non_important_victims)
+
+                    level_gen.place_in_room(i, j, victim_to_place)
+
+                # Always place fake victims
                 self.place_fake_victims(level_gen, i, j)
 
 

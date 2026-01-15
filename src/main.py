@@ -15,7 +15,9 @@ with open(config_path, "r") as file:
 with skip_run("run", "sar_gui_advanced") as check, check():
     # Access the width and height of the current display
     screen_height = pygame.display.Info().current_h
-    victim_placer = VictimPlacer(num_fake_victims=5, important_victim="down")
+    victim_placer = VictimPlacer(
+        num_fake_victims=5, num_real_victims=3, important_victim="down"
+    )
     env = PickupVictimEnv(
         num_rows=3,
         num_cols=3,
@@ -29,5 +31,6 @@ with skip_run("run", "sar_gui_advanced") as check, check():
         tile_size=64,
         victim_placer=victim_placer,
     )
-    gui = SAREnvGUI(env, fullscreen=True)
+    env.reset()
+    gui = SAREnvGUI(env, fullscreen=False)
     gui.run()

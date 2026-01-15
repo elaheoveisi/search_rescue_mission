@@ -34,7 +34,7 @@ class SAREnvGUI:
         self._calculate_offsets()
 
         # Initialize UI manager with theme
-        self.manager = pygame_gui.UIManager(self.window_size, "theme.json")
+        self.manager = pygame_gui.UIManager(self.window_size, "src/game/gui/theme.json")
 
         self.running = True
         self.clock = None

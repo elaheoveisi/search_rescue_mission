@@ -1,8 +1,10 @@
 import random
 
+from minigrid.core.world_object import Door
+
 from ..core.level import SARLevelGen
 from .actions import RescueAction
-from .instructions import PickupAllVictimsInstr
+from .instructions import PickupAllVictimsInstr, calculate_max_steps
 from .objects import REAL_VICTIMS
 from .utils import LavaPlacer
 
@@ -193,6 +195,14 @@ class PickupVictimEnv(SARLevelGen):
     def reset(self, **kwargs):
         """Reset the environment and all stats."""
         self.saved_victims = 0
+        self.fixed_max_steps = calculate_max_steps(
+            room_size=self.room_size,
+            num_cols=self.num_cols,
+            num_rows=self.num_rows,
+            victims_per_room=self.victim_placer.num_real_victims,
+            num_doors=self._count_objects_by_type(Door),
+        )
+        self.max_steps = self.fixed_max_steps
         return super().reset(**kwargs)
 
     def gen_mission(self):

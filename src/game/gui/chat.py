@@ -1,5 +1,5 @@
 import pygame
-from pygame_gui.elements import UIPanel, UILabel
+from pygame_gui.elements import UILabel, UIPanel
 
 
 class ChatPanel:
@@ -16,7 +16,9 @@ class ChatPanel:
 
         # Create main panel
         self.panel = UIPanel(
-            relative_rect=pygame.Rect(x_position, y_position, panel_width, panel_height),
+            relative_rect=pygame.Rect(
+                x_position, y_position, panel_width, panel_height
+            ),
             manager=manager,
         )
 
