@@ -1,38 +1,45 @@
 import pygame
-
-from .elements import ColorPalette, DrawUtils, Fonts
+from pygame_gui.elements import UIPanel, UILabel
 
 
 class ChatPanel:
-    """Chat panel for displaying messages and communication."""
+    """Chat panel using pygame_gui built-in elements."""
 
-    def __init__(self, x_position, y_position, panel_width, panel_height):
-        """Initialize the chat panel."""
+    def __init__(self, manager, x_position, y_position, panel_width, panel_height):
+        """Initialize the chat panel with pygame_gui elements."""
+        self.manager = manager
         self.panel_x = x_position
         self.panel_y = y_position
         self.panel_width = panel_width
         self.panel_height = panel_height
         self.messages = []
-        Fonts.init()
 
-    def render(self, surface):
-        """Render the chat panel."""
-        # Background and border
-        DrawUtils.draw_panel_background(
-            surface, self.panel_x, self.panel_y, self.panel_width, self.panel_height
+        # Create main panel
+        self.panel = UIPanel(
+            relative_rect=pygame.Rect(x_position, y_position, panel_width, panel_height),
+            manager=manager,
         )
 
-        # Content area
-        x = self.panel_x + 20
-        y = self.panel_y + 20
-        width = self.panel_width - 40
-
         # Title
-        y = DrawUtils.draw_title(surface, x, y, width, "CHAT")
+        self.title = UILabel(
+            relative_rect=pygame.Rect(0, 20, panel_width, 40),
+            text="CHAT",
+            manager=manager,
+            container=self.panel,
+            object_id="#title",
+        )
 
         # Placeholder text
-        placeholder = Fonts.text_font.render("Chat panel ready...", True, ColorPalette.TEXT_COLOR)
-        surface.blit(placeholder, (x, y))
+        self.placeholder = UILabel(
+            relative_rect=pygame.Rect(20, 80, panel_width - 40, 30),
+            text="Chat panel ready...",
+            manager=manager,
+            container=self.panel,
+        )
+
+    def render(self):
+        """Update the chat panel (placeholder for now)."""
+        pass
 
     def add_message(self, message):
         """Add a message to the chat."""

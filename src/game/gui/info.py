@@ -1,103 +1,163 @@
-from .elements import ColorPalette, DrawUtils, Fonts
+import pygame
+from pygame_gui.elements import UILabel, UIPanel
 
 
 class InfoPanel:
-    """Clean info panel to display game statistics and mission status."""
+    """Info panel using pygame_gui built-in elements."""
 
-    def __init__(self, env_size, panel_width):
-        """Initialize the info panel."""
-        self.env_size = env_size
-        self.panel_width = panel_width
+    def __init__(self, manager, env_size, panel_width):
+        """Initialize the info panel with pygame_gui elements."""
+        self.manager = manager
         self.panel_x = env_size
-        Fonts.init()
+        self.panel_width = panel_width
+        self.env_size = env_size
 
-    def render(self, surface, env):
-        """Render the info panel."""
-        # Background and border
-        DrawUtils.draw_panel_background(
-            surface, self.panel_x, 0, self.panel_width, self.env_size
+        # Create main panel
+        self.panel = UIPanel(
+            relative_rect=pygame.Rect(self.panel_x, 0, panel_width, env_size),
+            manager=manager,
         )
 
-        # Content area
-        x = self.panel_x + 20
-        y = 20
-        width = self.panel_width - 40
+        # Layout constants
+        PADDING_X = 30
+        content_width = panel_width - (PADDING_X * 2)
 
         # Title
-        y = DrawUtils.draw_title(surface, x, y, width, "MISSION CONTROL")
-
-        # Get mission data
-        mission_status = env.get_mission_status()
-        saved = mission_status.get("saved_victims", 0)
-        remaining = mission_status.get("remaining_victims", 0)
+        self.title = UILabel(
+            relative_rect=pygame.Rect(0, 20, panel_width, 40),
+            text="MISSION INFORMATION",
+            manager=manager,
+            container=self.panel,
+            object_id="#title",
+        )
 
         # Victims section
-        y = self._draw_section(
-            surface,
-            x,
-            y,
-            width,
-            "VICTIMS",
-            [
-                ("Rescued:", str(saved), ColorPalette.SUCCESS_COLOR),
-                (
-                    "Remaining:",
-                    str(remaining),
-                    ColorPalette.DANGER_COLOR
-                    if remaining > 0
-                    else ColorPalette.TEXT_COLOR,
-                ),
-                ("Score:", str(saved * 10), ColorPalette.TITLE_COLOR),
-            ],
+        self.victims_header = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 10, content_width, 30),
+            text="VICTIMS",
+            manager=manager,
+            container=self.panel,
+            object_id="#section_header",
+            anchors={"top": "top", "top_target": self.title},
+        )
+
+        self.rescued_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 5, content_width, 30),
+            text="Rescued: 0",
+            manager=manager,
+            container=self.panel,
+            object_id="label",
+            anchors={"top": "top", "top_target": self.victims_header},
+        )
+
+        self.remaining_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 5, content_width, 30),
+            text="Remaining: 0",
+            manager=manager,
+            container=self.panel,
+            anchors={"top": "top", "top_target": self.rescued_label},
+        )
+
+        self.score_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 5, content_width, 30),
+            text="Score: 0",
+            manager=manager,
+            container=self.panel,
+            anchors={"top": "top", "top_target": self.remaining_label},
         )
 
         # Time & Inventory section
+        self.time_header = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 20, content_width, 30),
+            text="TIME & INVENTORY",
+            manager=manager,
+            container=self.panel,
+            object_id="#section_header",
+            anchors={"top": "top", "top_target": self.score_label},
+        )
+
+        self.steps_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 10, content_width, 30),
+            text="Steps: 0 / 0",
+            manager=manager,
+            container=self.panel,
+            anchors={"top": "top", "top_target": self.time_header},
+        )
+
+        self.inventory_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, 10, content_width, 30),
+            text="Inventory: None",
+            manager=manager,
+            container=self.panel,
+            anchors={"top": "top", "top_target": self.steps_label},
+        )
+
+        # Status message (anchored to bottom)
+        self.status_label = UILabel(
+            relative_rect=pygame.Rect(PADDING_X, -50, content_width, 40),
+            text="",
+            manager=manager,
+            container=self.panel,
+            object_id="#success_text",
+            anchors={"bottom": "bottom"},
+        )
+
+    def _update_victims_section(self, mission_status):
+        """Update the victims section labels."""
+        saved = mission_status.get("saved_victims", 0)
+        remaining = mission_status.get("remaining_victims", 0)
+
+        self.rescued_label.set_text(f"Rescued: {saved}")
+        self.remaining_label.set_text(f"Remaining: {remaining}")
+        self.score_label.set_text(f"Score: {saved * 10}")
+
+        # Update remaining color based on count
+        if remaining > 0:
+            self.remaining_label.change_object_id("#danger_text")
+        else:
+            self.remaining_label.change_object_id("#success_text")
+
+    def _update_time_and_inventory(self, env):
+        """Update time and inventory labels."""
         steps = getattr(env, "step_count", 0)
         max_steps = getattr(env, "max_steps", 0)
         carrying = getattr(env, "carrying", None)
 
-        inventory_value = "None"
-        inventory_color = (100, 100, 110)
+        self.steps_label.set_text(f"Steps: {steps} / {max_steps}")
+
         if carrying:
-            inventory_value = f"{carrying.color.capitalize()} Key"
-            inventory_color = ColorPalette.KEY_COLORS.get(
-                carrying.color.capitalize(), (255, 255, 255)
-            )
+            inventory_text = f"Inventory: {carrying.color.capitalize()} Key"
+            # Set color based on key color
+            key_color_map = {
+                "red": "#red_key",
+                "green": "#green_key",
+                "blue": "#blue_key",
+                "yellow": "#yellow_key",
+                "purple": "#purple_key",
+                "grey": "#grey_key",
+            }
+            color_id = key_color_map.get(carrying.color.lower(), "#info_text")
+            self.inventory_label.change_object_id(color_id)
+            self.inventory_label.set_text(inventory_text)
+        else:
+            self.inventory_label.change_object_id("label")
+            self.inventory_label.set_text("Inventory: None")
 
-        y = self._draw_section(
-            surface,
-            x,
-            y,
-            width,
-            "TIME & INVENTORY",
-            [
-                ("Steps:", f"{steps} / {max_steps}", ColorPalette.INFO_COLOR),
-                ("Inventory:", inventory_value, inventory_color),
-            ],
-        )
-
-        # Status (only if mission ended)
+    def _update_status(self, mission_status):
+        """Update the status message label."""
         status = mission_status.get("status", "incomplete")
         if status == "success":
-            self._draw_status(
-                surface, x, "MISSION COMPLETE!", ColorPalette.SUCCESS_COLOR
-            )
+            self.status_label.change_object_id("#success_text")
+            self.status_label.set_text("MISSION COMPLETE!")
         elif status == "failure":
-            self._draw_status(surface, x, "MISSION FAILED", ColorPalette.DANGER_COLOR)
+            self.status_label.change_object_id("#danger_text")
+            self.status_label.set_text("MISSION FAILED")
+        else:
+            self.status_label.set_text("")
 
-    def _draw_section(self, surface, x, y, width, header, items):
-        """Draw a section with header and items."""
-        # Header with underline
-        y = DrawUtils.draw_section_header(surface, x, y, width, header)
-
-        # Items (label, value, color)
-        for label, value, color in items:
-            DrawUtils.draw_label_value_pair(surface, x, y, width, label, value, color)
-            y += 30
-
-        return y + 15
-
-    def _draw_status(self, surface, x, text, color):
-        """Draw status message at bottom."""
-        status_label = Fonts.section_font.render(text, True, color)
-        surface.blit(status_label, (x, self.env_size - 50))
+    def render(self, env):
+        """Update the panel with current game state."""
+        mission_status = env.get_mission_status()
+        self._update_victims_section(mission_status)
+        self._update_time_and_inventory(env)
+        self._update_status(mission_status)

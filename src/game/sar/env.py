@@ -190,6 +190,11 @@ class PickupVictimEnv(SARLevelGen):
         # Fall back to parent method for standard instructions
         return super().num_navs_needed(instrs)
 
+    def reset(self, **kwargs):
+        """Reset the environment and all stats."""
+        self.saved_victims = 0
+        return super().reset(**kwargs)
+
     def gen_mission(self):
         """Generate the mission layout and instructions."""
 

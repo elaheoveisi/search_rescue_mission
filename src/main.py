@@ -1,8 +1,6 @@
 import pygame
 import yaml
-from minigrid.manual_control import ManualControl
 
-from game.core.camera import FullviewCamera
 from game.gui.main import SAREnvGUI
 from game.sar.env import PickupVictimEnv
 from game.sar.utils import VictimPlacer
@@ -31,5 +29,5 @@ with skip_run("run", "sar_gui_advanced") as check, check():
         tile_size=64,
         victim_placer=victim_placer,
     )
-    gui = SAREnvGUI(env, fullscreen=False)
+    gui = SAREnvGUI(env, fullscreen=True)
     gui.run()
