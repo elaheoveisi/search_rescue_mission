@@ -1,8 +1,9 @@
-import pyglet
+import pygame
 import yaml
 
-from game.gui import MainGUI
-from game.osm import osm_to_grid
+from game.gui.main import SAREnvGUI
+from game.sar.env import PickupVictimEnv
+from game.sar.utils import VictimPlacer
 from utils import skip_run
 
 # Load config
@@ -11,19 +12,25 @@ with open(config_path, "r") as file:
     config = yaml.safe_load(file)
 
 
-with skip_run("skip", "main_gui") as check, check():
-    # Initialize the game and run with dynamic window size
-    window_width, window_height = 800, 800  # Example window size
-    game = MainGUI(window_width, window_height, config)  # Pass dynamic window size
-    pyglet.clock.schedule_interval(game.update, 1 / 15)
-    pyglet.app.run()
-
-with skip_run("run", "osm_to_grid") as check, check():
-    # Initialize the game and run with dynamic window size
-    grid = osm_to_grid("data/map.osm")
-    window_width, window_height = 800, 800  # Example window size
-    game = MainGUI(
-        window_width, window_height, config, grid
-    )  # Pass dynamic window size
-    pyglet.clock.schedule_interval(game.update, 1 / 15)
-    pyglet.app.run()
+with skip_run("run", "sar_gui_advanced") as check, check():
+    # Access the width and height of the current display
+    screen_height = pygame.display.Info().current_h
+    victim_placer = VictimPlacer(
+        num_fake_victims=5, num_real_victims=3, important_victim="down"
+    )
+    env = PickupVictimEnv(
+        num_rows=3,
+        num_cols=3,
+        screen_size=800,
+        render_mode="rgb_array",
+        agent_pov=True,
+        add_lava=True,
+        lava_per_room=2,
+        locked_room_prob=0.5,
+        # camera_strategy=FullviewCamera(),
+        tile_size=64,
+        victim_placer=victim_placer,
+    )
+    env.reset()
+    gui = SAREnvGUI(env, fullscreen=False)
+    gui.run()
