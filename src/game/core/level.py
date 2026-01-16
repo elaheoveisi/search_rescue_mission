@@ -1,0 +1,111 @@
+import numpy as np
+import pygame
+from minigrid.envs.babyai.core.levelgen import LevelGen
+
+from .camera import CameraStrategy, EdgeFollowCamera
+
+
+class SARLevelGen(LevelGen):
+    """Search and Rescue level generator with pluggable camera system."""
+
+    def __init__(
+        self,
+        room_size=8,
+        num_rows=3,
+        num_cols=3,
+        num_dists=18,
+        locked_room_prob=0.5,
+        locations=True,
+        unblocking=True,
+        implicit_unlock=True,
+        action_kinds=["goto", "pickup", "open", "putnext"],
+        instr_kinds=["action", "and", "seq"],
+        window=None,
+        camera_strategy=None,
+        **kwargs,
+    ):
+        if window is None:
+            self.window = pygame.display.set_mode([800, 800])
+
+        super().__init__(
+            room_size,
+            num_rows,
+            num_cols,
+            num_dists,
+            locked_room_prob,
+            locations,
+            unblocking,
+            implicit_unlock,
+            action_kinds,
+            instr_kinds,
+            **kwargs,
+        )
+
+        # Use strategy pattern for camera
+        self.camera = camera_strategy or EdgeFollowCamera()
+        self.saved_victims = 0
+
+    def gen_mission(self):
+        """Generate the mission layout and instructions."""
+        if self._rand_float(0, 1) <= 0:
+            self.add_locked_room()
+
+        self.connect_all()
+
+        # Place agent outside locked room
+        while True:
+            self.place_agent()
+            start_room = self.room_from_pos(*self.agent_pos)
+            if start_room is not self.locked_room:
+                break
+
+        if not self.unblocking:
+            self.check_objs_reachable()
+
+        self.instrs = self.rand_instr(
+            action_kinds=self.action_kinds,
+            instr_kinds=self.instr_kinds,
+        )
+
+    def get_camera_view(self, **kwargs) -> np.ndarray:
+        """Get current camera view using the configured strategy."""
+        room = self.room_from_pos(*self.agent_pos)
+        return self.camera.get_crop(
+            grid=self.grid,
+            agent_pos=self.agent_pos,
+            agent_dir=self.agent_dir,
+            room=room,
+            grid_width=self.width,
+            grid_height=self.height,
+            **kwargs,
+        )
+
+    def render(self):
+        """Render the environment."""
+        img = self.get_camera_view()
+
+        if self.render_mode == "human":
+            img = np.transpose(img, axes=(1, 0, 2))
+
+            if self.window is None:
+                pygame.init()
+                pygame.display.init()
+                self.window = pygame.display.set_mode(
+                    (self.screen_size, self.screen_size)
+                )
+
+            surf = pygame.surfarray.make_surface(img)
+            surf = pygame.transform.smoothscale(
+                surf, (self.screen_size, self.screen_size)
+            )
+
+            self.window.blit(surf, (0, 0))
+            pygame.event.pump()
+            pygame.display.flip()
+
+        elif self.render_mode == "rgb_array":
+            return img
+
+    def switch_camera(self, camera_strategy: CameraStrategy):
+        """Switch to a different camera strategy at runtime."""
+        self.camera = camera_strategy
