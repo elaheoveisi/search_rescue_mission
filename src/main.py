@@ -4,6 +4,7 @@ import yaml
 from game.gui.main import SAREnvGUI
 from game.sar.env import PickupVictimEnv
 from game.sar.utils import VictimPlacer
+from game.tutorial_env import TutorialEnv
 from utils import skip_run
 
 # Load config
@@ -18,7 +19,13 @@ with skip_run("run", "sar_gui_advanced") as check, check():
     victim_placer = VictimPlacer(
         num_fake_victims=5, num_real_victims=3, important_victim="down"
     )
-    env = PickupVictimEnv(
+    # Toggle tutorial mode here
+    TUTORIAL = True
+
+    if TUTORIAL:
+        env = TutorialEnv(start_part=1, screen_size=800, render_mode="rgb_array", agent_pov=True, tile_size=64)
+    else:
+        env = PickupVictimEnv(
         num_rows=3,
         num_cols=3,
         screen_size=800,
